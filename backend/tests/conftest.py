@@ -21,9 +21,16 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _test_database_url() -> str:
+    """Builds the dealrank_test connection string. Uses render_as_string
+    with hide_password=False — plain str(url) / url.set(...) masks the
+    password as "***" (SQLAlchemy's default, meant for logging), which
+    would make every downstream connection built from this string
+    authenticate with the literal text "***" instead of the real
+    password.
+    """
     base_url = os.environ["DATABASE_URL"]
     url = sa.engine.make_url(base_url)
-    return str(url.set(database=f"{url.database}_test"))
+    return url.set(database=f"{url.database}_test").render_as_string(hide_password=False)
 
 
 def _ensure_database_exists(test_url: str) -> None:
