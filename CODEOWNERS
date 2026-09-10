@@ -1,0 +1,8 @@
+# The calculation engine is the grading-sensitive layer (methodology
+# soundness is 35% of the rubric). Changes here need review from whoever
+# on the team is tracking methodology correctness against the course
+# rubric, not just any teammate.
+#
+# TODO: replace @methodology-owner with that person's GitHub username
+# once the team assigns the role.
+/backend/app/engine/  @methodology-owner

@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- Node / React ---
+node_modules/
+frontend/dist/
+frontend/build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- DB / local dev ---
+*.sqlite3
+pgdata/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+
+# --- Claude ---
+.claude/
