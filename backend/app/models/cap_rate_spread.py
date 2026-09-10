@@ -16,9 +16,7 @@ class CapRateSpread(Base):
 
     __tablename__ = "cap_rate_spreads"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sub_asset_class: Mapped[str] = mapped_column(String(50), nullable=False)
     survey_source: Mapped[str] = mapped_column(String(100), nullable=False)
     survey_quarter: Mapped[str] = mapped_column(String(10), nullable=False)  # e.g. "2026Q2"

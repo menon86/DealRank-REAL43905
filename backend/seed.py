@@ -5,6 +5,7 @@ against the same numbers without hand-typing deals.
 Usage (with DATABASE_URL set, e.g. via docker-compose up + .env):
     python seed.py
 """
+
 import os
 import uuid
 from decimal import Decimal

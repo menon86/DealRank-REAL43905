@@ -91,24 +91,20 @@ cd frontend && npm install && npm run dev   # in another
 - The calculation engine (`backend/app/engine/`) is the grading-sensitive layer — see
   [`CODEOWNERS`](CODEOWNERS) for the review requirement on that directory.
 
-### Manual GitHub setup steps (not scriptable without `gh` CLI access)
+### GitHub setup status
 
-This repo was initialized locally. To finish setup on GitHub:
+- Repo created and pushed: [github.com/menon86/DealRank-REAL43905](https://github.com/menon86/DealRank-REAL43905)
+  (public — GitHub's free plan only supports branch protection on public repos)
+- Branch protection on `main` is **enabled**: requires 1 PR approval, requires the `backend` and
+  `frontend` CI jobs to pass, blocks force-pushes and deletions.
 
-1. Create the repo (name: `DealRank-REAL43905`, suggested visibility: private) and push:
-   ```bash
-   git remote add origin <repo-url>
-   git push -u origin main
-   ```
-2. **Enable branch protection on `main`** (Settings -> Branches -> Add rule):
-   - Require a pull request before merging (require at least 1 approval)
-   - Require status checks to pass before merging — select the `backend` and `frontend` CI jobs
-   - Do this only *after* the first push, since a rule can't protect a branch that doesn't exist yet
-3. **Add teammates as collaborators** (Settings -> Collaborators): add each teammate's GitHub
+### Remaining manual steps
+
+1. **Add teammates as collaborators** (Settings -> Collaborators): add each teammate's GitHub
    username once you have them.
-4. **Set `CODEOWNERS` reviewer**: replace `@methodology-owner` in [`CODEOWNERS`](CODEOWNERS) with
+2. **Set `CODEOWNERS` reviewer**: replace `@methodology-owner` in [`CODEOWNERS`](CODEOWNERS) with
    the actual GitHub username of whoever is tracking methodology correctness, once the team decides.
-5. **Tag Deliverable 2 at submission time** (don't rely on whatever `main` happens to be on
+3. **Tag Deliverable 2 at submission time** (don't rely on whatever `main` happens to be on
    submission day):
    ```bash
    git tag deliverable-2

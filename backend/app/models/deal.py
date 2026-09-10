@@ -30,9 +30,7 @@ class Deal(Base):
 
     __tablename__ = "deals"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sub_asset_class: Mapped[SubAssetClass] = mapped_column(
         Enum(SubAssetClass, name="sub_asset_class"), nullable=False
