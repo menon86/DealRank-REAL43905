@@ -6,7 +6,12 @@ mechanics (per-unit vs. per-bed) and different risk profiles on one apples-to-ap
 of the per-unit-only view most underwriting tools (e.g. DealCheck) provide.
 
 **Current phase: Deliverable 2 (MVP), due Week 6.** See [`docs/build-plan.md`](docs/build-plan.md)
-for the full task breakdown (added after Deliverable 2 planning is approved).
+for the full task breakdown.
+
+**Status: functionally complete end to end.** The calculation engine, the FastAPI CRUD/metrics/
+ranking/export endpoints, and the React frontend all exist and are wired together — see
+[What's built](#whats-built) below. Not yet done: the Render deploy itself (config is checked in,
+see [`render.yaml`](render.yaml)) and this deliverable's git tag.
 
 ## Methodology summary
 
@@ -27,8 +32,18 @@ for the full task breakdown (added after Deliverable 2 planning is approved).
 - Cap rate spreads and market rent data are static, versioned, manually-refreshed lookup tables —
   never live queries, never CoStar or other licensed data.
 
-Full formulas and rationale live in the project spec (see team docs); the calculation engine in
-[`backend/app/engine/`](backend/app/engine/) is the authoritative implementation once built.
+Full formulas and rationale live in the project spec (see team docs) and in
+[`docs/methodology.md`](docs/methodology.md); the calculation engine in
+[`backend/app/engine/`](backend/app/engine/) is the authoritative implementation.
+
+## What's built
+
+| Layer | Status |
+| --- | --- |
+| Calculation engine (`backend/app/engine/`) | Done — 35 tests, golden-case fixtures in [`docs/golden-case-derivation.md`](docs/golden-case-derivation.md) |
+| API (`backend/app/api/`) | Done — deal CRUD, `GET /deals/{id}/metrics`, `POST /rank`, `GET /reports/{pdf,pptx}`, 21 tests |
+| Frontend (`frontend/`) | Done — deal form, deal list, comparison table, ranking view, PDF/PPTX download buttons, wired to the real API |
+| Deploy (Render) | Config checked in ([`render.yaml`](render.yaml)); not yet deployed |
 
 ## Scope
 
@@ -62,12 +77,14 @@ Monte Carlo sensitivity, development feasibility analysis.
     /engine      calculation engine — zero API/UI imports
     /api         FastAPI routes
     /models      SQLAlchemy models / Pydantic schemas
+    /reports     PDF/PPTX export
   /tests
   /migrations    Alembic migrations
 /frontend        React app
-/docs            build plan, methodology notes, provenance memo (later)
+/docs            build plan, methodology notes, golden-case derivation
 /.github         PR template, issue templates, CI workflow
 docker-compose.yml   local Postgres for dev
+render.yaml          Render deploy config (API, frontend, managed Postgres)
 ```
 
 ## Local setup
@@ -79,10 +96,13 @@ Quick start:
 
 ```bash
 docker-compose up -d
-cd backend && pip install -e ".[dev]" && alembic upgrade head && python seed.py
+cd backend && pip install -e ".[dev]" && cp .env.example .env && alembic upgrade head && python seed.py
 uvicorn app.main:app --reload --port 8000   # in one terminal
 cd frontend && npm install && npm run dev   # in another
 ```
+
+The frontend defaults to `http://localhost:8000` for the API — copy `frontend/.env.example` to
+`frontend/.env.local` and set `VITE_API_BASE_URL` if the backend runs somewhere else.
 
 ## Team workflow
 
@@ -110,6 +130,12 @@ cd frontend && npm install && npm run dev   # in another
    git tag deliverable-2
    git push origin deliverable-2
    ```
+4. **Deploy to Render**: [`render.yaml`](render.yaml) defines the API service, the static
+   frontend, and a managed Postgres instance. In the Render dashboard, "New +" -> "Blueprint",
+   point it at this repo, and Render provisions all three from the file. After the first deploy,
+   set `VITE_API_BASE_URL` (frontend) to the deployed API's URL and `CORS_ORIGINS` (API) to the
+   deployed frontend's URL — `render.yaml` wires these automatically via Render's `fromService`
+   references, but double-check them in the dashboard if either service is renamed.
 
 ## Disclaimer
 

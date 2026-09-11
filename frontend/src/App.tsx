@@ -55,14 +55,21 @@ export function App() {
       return;
     }
     let cancelled = false;
-    Promise.all(selectedDeals.map((deal) => client.getMetrics(deal.id))).then((results) => {
-      if (cancelled) return;
-      const entries: Record<string, MetricsOut> = {};
-      selectedDeals.forEach((deal, i) => {
-        entries[deal.id] = results[i];
+    Promise.all(selectedDeals.map((deal) => client.getMetrics(deal.id)))
+      .then((results) => {
+        if (cancelled) return;
+        const entries: Record<string, MetricsOut> = {};
+        selectedDeals.forEach((deal, i) => {
+          entries[deal.id] = results[i];
+        });
+        setMetricsByDealId(entries);
+      })
+      .catch(() => {
+        // A transient fetch failure here just leaves the comparison
+        // table showing its loading state for those deals; the deal
+        // list itself still works. listDeals()'s own catch is what
+        // surfaces the "can't reach the backend" screen.
       });
-      setMetricsByDealId(entries);
-    });
     return () => {
       cancelled = true;
     };
@@ -73,7 +80,10 @@ export function App() {
       setRankedDeals([]);
       return;
     }
-    client.rank(selectedIds, hurdleRate).then(setRankedDeals);
+    client.rank(selectedIds, hurdleRate).then(setRankedDeals, () => {
+      // Same reasoning as the metrics fetch above: leave the ranking
+      // view showing its previous (or empty) state rather than crashing.
+    });
   }, [selectedIds, hurdleRate, deals]);
 
   function toggleSelected(id: string) {
@@ -145,7 +155,11 @@ export function App() {
       )}
 
       {activeTab === "compare" && (
-        <ComparisonTable deals={selectedDeals} metricsByDealId={metricsByDealId} />
+        <ComparisonTable
+          deals={selectedDeals}
+          metricsByDealId={metricsByDealId}
+          hurdleRate={hurdleRate}
+        />
       )}
 
       {activeTab === "rank" && (

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.deals import router as deals_router
 from app.api.rank import router as rank_router
+from app.api.reports import router as reports_router
 from app.config import get_settings
 
 settings = get_settings()
@@ -25,6 +26,4 @@ def health() -> dict[str, str]:
 
 app.include_router(deals_router)
 app.include_router(rank_router)
-
-# PDF/PPTX export routes are added in the export phase (see
-# docs/build-plan.md Phase 6) — not wired yet.
+app.include_router(reports_router)

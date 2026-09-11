@@ -13,6 +13,11 @@ dependencies = [
     "pydantic-settings>=2.5,<3.0",
     "numpy-financial>=1.0,<2.0",
     "python-dotenv>=1.0,<2.0",
+    # Export (docs/build-plan.md D4): reportlab is pure Python, so Render
+    # needs no system packages for the PDF path (WeasyPrint would need
+    # cairo/pango). python-pptx has no meaningful alternative for PPTX.
+    "reportlab>=4.2,<5.0",
+    "python-pptx>=1.0,<2.0",
 ]
 
 [project.optional-dependencies]

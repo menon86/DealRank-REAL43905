@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { buildReportUrl } from "../lib/client";
 import { fractionToPercentInput, formatPercent, percentInputToFraction } from "../lib/format";
 import type { RankedDealOut } from "../lib/types";
 
@@ -37,7 +38,25 @@ export function RankingView({
 
   return (
     <div className="card">
-      <h2>Ranking</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <h2>Ranking</h2>
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <a
+            className="secondary"
+            style={{ textDecoration: "none" }}
+            href={buildReportUrl("pdf", selectedDealIds, hurdleRate)}
+          >
+            Download PDF
+          </a>
+          <a
+            className="secondary"
+            style={{ textDecoration: "none" }}
+            href={buildReportUrl("pptx", selectedDealIds, hurdleRate)}
+          >
+            Download PPTX
+          </a>
+        </div>
+      </div>
 
       <div className="hurdle-input">
         <label htmlFor="hurdle-rate">Hurdle rate (%)</label>

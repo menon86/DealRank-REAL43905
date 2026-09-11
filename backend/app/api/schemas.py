@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from app.api.ranking_data import RANKING_BASIS_NOTE
 from app.models.deal import LeasingMode, SubAssetClass
 
 
@@ -167,12 +168,6 @@ class MetricsOut(BaseModel):
 class RankRequest(BaseModel):
     deal_ids: list[uuid.UUID]
     hurdle_rate: Decimal
-
-
-RANKING_BASIS_NOTE = (
-    "Ranked by unlevered IRR minus the supplied hurdle rate, descending. "
-    "Levered IRR is included for reference only and is never sorted on."
-)
 
 
 class RankedDealOut(BaseModel):

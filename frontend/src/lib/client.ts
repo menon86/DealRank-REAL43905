@@ -185,3 +185,21 @@ export async function rank(dealIds: string[], hurdleRate: number): Promise<Ranke
   });
   return raw.map(parseRankedDealOut);
 }
+
+/**
+ * GET /reports/pdf and GET /reports/pptx (docs/build-plan.md 6.4) are
+ * plain file downloads, not JSON — build the URL and let a plain <a
+ * href> trigger the browser's normal download flow (the
+ * Content-Disposition: attachment header on the response does the rest)
+ * rather than fetching the bytes here.
+ */
+export function buildReportUrl(
+  kind: "pdf" | "pptx",
+  dealIds: string[],
+  hurdleRate: number,
+): string {
+  const params = new URLSearchParams();
+  for (const id of dealIds) params.append("deal_ids", id);
+  params.set("hurdle_rate", String(hurdleRate));
+  return `${API_BASE_URL}/reports/${kind}?${params.toString()}`;
+}

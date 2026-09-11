@@ -1,9 +1,11 @@
+import { buildReportUrl } from "../lib/client";
 import { formatMoney, formatMultiple, formatNumber, formatPercent } from "../lib/format";
 import type { DealOut, MetricsOut } from "../lib/types";
 
 interface ComparisonTableProps {
   deals: DealOut[];
   metricsByDealId: Record<string, MetricsOut>;
+  hurdleRate: number;
 }
 
 interface Row {
@@ -63,7 +65,7 @@ const HEADLINE_ROWS: Row[] = [
   { label: "Net sale proceeds", value: (_, m) => formatMoney(m.net_sale_proceeds) },
 ];
 
-export function ComparisonTable({ deals, metricsByDealId }: ComparisonTableProps) {
+export function ComparisonTable({ deals, metricsByDealId, hurdleRate }: ComparisonTableProps) {
   if (deals.length === 0) {
     return (
       <div className="card">
@@ -85,9 +87,29 @@ export function ComparisonTable({ deals, metricsByDealId }: ComparisonTableProps
     ));
   }
 
+  const dealIds = deals.map((deal) => deal.id);
+
   return (
     <div className="card">
-      <h2>Comparison</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <h2>Comparison</h2>
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <a
+            className="secondary"
+            style={{ textDecoration: "none" }}
+            href={buildReportUrl("pdf", dealIds, hurdleRate)}
+          >
+            Download PDF
+          </a>
+          <a
+            className="secondary"
+            style={{ textDecoration: "none" }}
+            href={buildReportUrl("pptx", dealIds, hurdleRate)}
+          >
+            Download PPTX
+          </a>
+        </div>
+      </div>
       <div style={{ overflowX: "auto" }}>
         <table className="data-table">
           <thead>
