@@ -1,197 +1,187 @@
 /**
- * Local/mock data client — see docs/build-plan.md 5.1 ("a typed api.ts...
- * against mocked client"). Implements the same function signatures the
- * real API client will have once Phase 3's FastAPI endpoints exist
- * (docs/build-plan.md section 5's frozen contract), but computes
- * everything in-browser via engine.ts instead of calling fetch(). Swap
- * point for later: replace the bodies of these functions with fetch
- * calls against the deployed API; nothing that imports from this module
- * needs to change shape.
+ * Real API client — talks to the FastAPI backend (backend/app/api/) over
+ * the frozen contract in docs/build-plan.md section 5. This replaces the
+ * in-browser mock/local-engine client that existed before Phase 3's
+ * endpoints were built; see git history for that version if the backend
+ * is ever unavailable and a standalone demo is needed again.
  *
- * Deals persist to localStorage so edits survive a reload during a demo.
- * Seeded with the same three deals as backend/seed.py.
+ * Money and rate fields travel as decimal strings over the wire
+ * (pydantic v2's default Decimal JSON encoding) but are represented as
+ * plain `number` everywhere else in this frontend (see lib/types.ts) —
+ * the parse* helpers below are the one place that string-to-number
+ * conversion happens on the way in. Nothing needs to happen on the way
+ * out: FastAPI/pydantic accepts plain JSON numbers for Decimal fields
+ * just fine, so requests just send the DealInputFields numbers as-is.
  */
 
-import { computeMetrics } from "./engine";
-import type { DealCreate, DealOut, DealUpdate, MetricsOut, RankedDealOut } from "./types";
+import type {
+  AnnualCashFlowOut,
+  DealCreate,
+  DealOut,
+  DealUpdate,
+  MetricsOut,
+  RankedDealOut,
+} from "./types";
 
-const STORAGE_KEY = "dealrank.deals.v1";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-function seedDeals(): DealOut[] {
-  const now = new Date().toISOString();
-  return [
-    {
-      id: "seed-student-housing",
-      name: "Campus View Student Housing",
-      sub_asset_class: "student_housing",
-      leasing_mode: "per_bed",
-      unit_count: null,
-      monthly_rent_per_unit: null,
-      bed_count: 240,
-      monthly_rent_per_bed: 750,
-      vacancy_rate: 0.06,
-      other_income_annual: 36000,
-      opex_annual: 620000,
-      expense_growth_rate: 0.03,
-      rent_growth_rate: 0.03,
-      lease_expiration_month: 8,
-      turnover_cost_per_unit_or_bed: 350,
-      annual_turnover_rate: 0.85,
-      purchase_price: 21500000,
-      closing_costs: 430000,
-      loan_amount: 14000000,
-      interest_rate: 0.0625,
-      amortization_years: 30,
-      hold_period_years: 7,
-      exit_cap_rate: 0.058,
-      selling_costs_rate: 0.02,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "seed-suburban-garden",
-      name: "Willowbrook Suburban Garden",
-      sub_asset_class: "suburban_garden",
-      leasing_mode: "per_unit",
-      unit_count: 180,
-      monthly_rent_per_unit: 1450,
-      bed_count: null,
-      monthly_rent_per_bed: null,
-      vacancy_rate: 0.05,
-      other_income_annual: 54000,
-      opex_annual: 980000,
-      expense_growth_rate: 0.03,
-      rent_growth_rate: 0.025,
-      lease_expiration_month: 6,
-      turnover_cost_per_unit_or_bed: 900,
-      annual_turnover_rate: 0.55,
-      purchase_price: 28800000,
-      closing_costs: 576000,
-      loan_amount: 18700000,
-      interest_rate: 0.06,
-      amortization_years: 30,
-      hold_period_years: 10,
-      exit_cap_rate: 0.055,
-      selling_costs_rate: 0.02,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "seed-urban-midrise",
-      name: "Meridian Urban Mid-Rise",
-      sub_asset_class: "urban_midrise",
-      leasing_mode: "per_unit",
-      unit_count: 95,
-      monthly_rent_per_unit: 2100,
-      bed_count: null,
-      monthly_rent_per_bed: null,
-      vacancy_rate: 0.07,
-      other_income_annual: 42000,
-      opex_annual: 870000,
-      expense_growth_rate: 0.03,
-      rent_growth_rate: 0.02,
-      lease_expiration_month: 5,
-      turnover_cost_per_unit_or_bed: 1500,
-      annual_turnover_rate: 0.5,
-      purchase_price: 32000000,
-      closing_costs: 640000,
-      loan_amount: 20800000,
-      interest_rate: 0.0615,
-      amortization_years: 30,
-      hold_period_years: 10,
-      exit_cap_rate: 0.05,
-      selling_costs_rate: 0.02,
-      created_at: now,
-      updated_at: now,
-    },
-  ];
+const DEAL_DECIMAL_FIELDS: (keyof DealOut)[] = [
+  "monthly_rent_per_unit",
+  "monthly_rent_per_bed",
+  "vacancy_rate",
+  "other_income_annual",
+  "opex_annual",
+  "expense_growth_rate",
+  "rent_growth_rate",
+  "turnover_cost_per_unit_or_bed",
+  "annual_turnover_rate",
+  "purchase_price",
+  "closing_costs",
+  "loan_amount",
+  "interest_rate",
+  "exit_cap_rate",
+  "selling_costs_rate",
+];
+
+const CASH_FLOW_DECIMAL_FIELDS: (keyof AnnualCashFlowOut)[] = [
+  "gpr",
+  "vacancy_loss",
+  "other_income",
+  "egi",
+  "opex",
+  "turnover_expense",
+  "noi",
+  "debt_service",
+  "interest_paid",
+  "principal_paid",
+  "ending_loan_balance",
+  "levered_cash_flow",
+  "unlevered_cash_flow",
+];
+
+const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
+  "year_one_noi",
+  "going_in_cap_rate",
+  "year_one_dscr",
+  "cash_on_cash",
+  "unlevered_irr",
+  "levered_irr",
+  "equity_multiple",
+  "exit_value",
+  "net_sale_proceeds",
+];
+
+/** "0.0625" -> 0.0625; null passes through; numbers already-parsed pass through. */
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return value;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
-function loadDeals(): DealOut[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seedDeals();
-    const parsed = JSON.parse(raw) as DealOut[];
-    if (!Array.isArray(parsed) || parsed.length === 0) return seedDeals();
-    return parsed;
-  } catch {
-    return seedDeals();
+function parseFields<T extends Record<string, unknown>>(raw: T, fields: (keyof T)[]): T {
+  const parsed = { ...raw };
+  for (const field of fields) {
+    (parsed as Record<string, unknown>)[field as string] = toNumber(raw[field]);
+  }
+  return parsed;
+}
+
+function parseDealOut(raw: DealOut): DealOut {
+  return parseFields(raw, DEAL_DECIMAL_FIELDS);
+}
+
+function parseAnnualCashFlowOut(raw: AnnualCashFlowOut): AnnualCashFlowOut {
+  return parseFields(raw, CASH_FLOW_DECIMAL_FIELDS);
+}
+
+function parseMetricsOut(raw: MetricsOut): MetricsOut {
+  const parsed = parseFields(raw, METRICS_DECIMAL_FIELDS);
+  return {
+    ...parsed,
+    annual_cash_flows: raw.annual_cash_flows.map(parseAnnualCashFlowOut),
+  };
+}
+
+function parseRankedDealOut(raw: RankedDealOut): RankedDealOut {
+  return {
+    ...raw,
+    deal: parseDealOut(raw.deal),
+    metrics: parseMetricsOut(raw.metrics),
+    spread: toNumber(raw.spread) ?? 0,
+  };
+}
+
+class ApiError extends Error {
+  constructor(
+    method: string,
+    path: string,
+    public status: number,
+    public body: string,
+  ) {
+    super(`${method} ${path} failed: ${status} ${body}`);
   }
 }
 
-function saveDeals(deals: DealOut[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
-  } catch {
-    // localStorage unavailable (private mode, etc.) — demo still works
-    // for the current page load, just doesn't persist across reloads.
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = options?.method ?? "GET";
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new ApiError(method, path, res.status, body);
   }
-}
-
-let deals: DealOut[] = loadDeals();
-
-function nextId(): string {
-  return `deal-${Math.random().toString(36).slice(2, 10)}`;
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
 }
 
 export async function listDeals(): Promise<DealOut[]> {
-  return [...deals];
+  const raw = await request<DealOut[]>("/deals");
+  return raw.map(parseDealOut);
 }
 
 export async function getDeal(id: string): Promise<DealOut | null> {
-  return deals.find((d) => d.id === id) ?? null;
+  try {
+    const raw = await request<DealOut>(`/deals/${id}`);
+    return parseDealOut(raw);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 export async function createDeal(input: DealCreate): Promise<DealOut> {
-  const now = new Date().toISOString();
-  const deal: DealOut = { ...input, id: nextId(), created_at: now, updated_at: now };
-  deals = [...deals, deal];
-  saveDeals(deals);
-  return deal;
+  const raw = await request<DealOut>("/deals", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return parseDealOut(raw);
 }
 
 export async function updateDeal(id: string, input: DealUpdate): Promise<DealOut> {
-  const index = deals.findIndex((d) => d.id === id);
-  if (index === -1) throw new Error(`Deal ${id} not found`);
-  const updated: DealOut = { ...deals[index], ...input, updated_at: new Date().toISOString() };
-  deals = [...deals.slice(0, index), updated, ...deals.slice(index + 1)];
-  saveDeals(deals);
-  return updated;
+  const raw = await request<DealOut>(`/deals/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  return parseDealOut(raw);
 }
 
 export async function deleteDeal(id: string): Promise<void> {
-  deals = deals.filter((d) => d.id !== id);
-  saveDeals(deals);
+  await request<void>(`/deals/${id}`, { method: "DELETE" });
 }
 
 export async function getMetrics(id: string): Promise<MetricsOut> {
-  const deal = deals.find((d) => d.id === id);
-  if (!deal) throw new Error(`Deal ${id} not found`);
-  return computeMetrics(deal);
+  const raw = await request<MetricsOut>(`/deals/${id}/metrics`);
+  return parseMetricsOut(raw);
 }
 
-/**
- * Sorted by unlevered_irr - hurdle_rate descending, matching
- * docs/build-plan.md 3.4. Levered IRR is returned for display and never
- * sorted on.
- */
 export async function rank(dealIds: string[], hurdleRate: number): Promise<RankedDealOut[]> {
-  const selected = dealIds
-    .map((id) => deals.find((d) => d.id === id))
-    .filter((d): d is DealOut => Boolean(d));
-
-  const withMetrics = selected.map((deal) => {
-    const metrics = computeMetrics(deal);
-    const spread = (metrics.unlevered_irr ?? -Infinity) - hurdleRate;
-    return { deal, metrics, spread };
+  if (dealIds.length === 0) return [];
+  const raw = await request<RankedDealOut[]>("/rank", {
+    method: "POST",
+    body: JSON.stringify({ deal_ids: dealIds, hurdle_rate: hurdleRate }),
   });
-
-  withMetrics.sort((a, b) => b.spread - a.spread);
-
-  return withMetrics.map((entry, index) => ({
-    deal: entry.deal,
-    metrics: entry.metrics,
-    spread: entry.spread,
-    rank: index + 1,
-  }));
+  return raw.map(parseRankedDealOut);
 }

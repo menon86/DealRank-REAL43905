@@ -77,9 +77,10 @@ export function ComparisonTable({ deals, metricsByDealId }: ComparisonTableProps
     return rows.map((row) => (
       <tr key={row.label} className={row.className}>
         <td>{row.label}</td>
-        {deals.map((deal) => (
-          <td key={deal.id}>{row.value(deal, metricsByDealId[deal.id])}</td>
-        ))}
+        {deals.map((deal) => {
+          const metrics = metricsByDealId[deal.id];
+          return <td key={deal.id}>{metrics ? row.value(deal, metrics) : "…"}</td>;
+        })}
       </tr>
     ));
   }

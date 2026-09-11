@@ -6,7 +6,6 @@ import { RankingView } from "./components/RankingView";
 import { Shell } from "./components/Shell";
 import type { Tab } from "./components/Shell";
 import * as client from "./lib/client";
-import { computeMetrics } from "./lib/engine";
 import type { DealCreate, DealOut, MetricsOut, RankedDealOut } from "./lib/types";
 
 const DEFAULT_HURDLE_RATE = 0.08;
@@ -19,21 +18,24 @@ export function App() {
   const [showForm, setShowForm] = useState(false);
   const [hurdleRate, setHurdleRate] = useState(DEFAULT_HURDLE_RATE);
   const [rankedDeals, setRankedDeals] = useState<RankedDealOut[]>([]);
+  const [metricsByDealId, setMetricsByDealId] = useState<Record<string, MetricsOut>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
-    client.listDeals().then((loaded) => {
-      setDeals(loaded);
-      setSelectedIds(loaded.slice(0, 3).map((d) => d.id));
-    });
+    client
+      .listDeals()
+      .then((loaded) => {
+        setApiError(null);
+        setDeals(loaded);
+        setSelectedIds(loaded.slice(0, 3).map((d) => d.id));
+      })
+      .catch(() => {
+        setApiError(
+          "Couldn't reach the DealRank API. Make sure the backend is running " +
+            "(see backend/README or docs/build-plan.md) and VITE_API_BASE_URL points at it.",
+        );
+      });
   }, []);
-
-  useEffect(() => {
-    if (selectedIds.length === 0) {
-      setRankedDeals([]);
-      return;
-    }
-    client.rank(selectedIds, hurdleRate).then(setRankedDeals);
-  }, [selectedIds, hurdleRate, deals]);
 
   const selectedDeals = useMemo(
     () =>
@@ -43,13 +45,36 @@ export function App() {
     [selectedIds, deals],
   );
 
-  const metricsByDealId = useMemo(() => {
-    const entries: Record<string, MetricsOut> = {};
-    for (const deal of selectedDeals) {
-      entries[deal.id] = computeMetrics(deal);
+  // Metrics come from the backend's calculation engine (GET
+  // /deals/{id}/metrics), one call per selected deal, rather than being
+  // recomputed client-side — the API is the single source of truth now
+  // that Phase 3 exists.
+  useEffect(() => {
+    if (selectedDeals.length === 0) {
+      setMetricsByDealId({});
+      return;
     }
-    return entries;
+    let cancelled = false;
+    Promise.all(selectedDeals.map((deal) => client.getMetrics(deal.id))).then((results) => {
+      if (cancelled) return;
+      const entries: Record<string, MetricsOut> = {};
+      selectedDeals.forEach((deal, i) => {
+        entries[deal.id] = results[i];
+      });
+      setMetricsByDealId(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedDeals]);
+
+  useEffect(() => {
+    if (selectedIds.length === 0) {
+      setRankedDeals([]);
+      return;
+    }
+    client.rank(selectedIds, hurdleRate).then(setRankedDeals);
+  }, [selectedIds, hurdleRate, deals]);
 
   function toggleSelected(id: string) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -75,6 +100,17 @@ export function App() {
     await client.deleteDeal(id);
     setSelectedIds((prev) => prev.filter((x) => x !== id));
     await refreshDeals();
+  }
+
+  if (apiError) {
+    return (
+      <Shell activeTab={activeTab} onTabChange={setActiveTab}>
+        <div className="card">
+          <h2>Can&apos;t connect to the backend</h2>
+          <p style={{ fontSize: 13, color: "var(--color-negative)" }}>{apiError}</p>
+        </div>
+      </Shell>
+    );
   }
 
   return (
