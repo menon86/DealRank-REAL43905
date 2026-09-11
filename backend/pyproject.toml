@@ -13,6 +13,11 @@ dependencies = [
     "pydantic-settings>=2.5,<3.0",
     "numpy-financial>=1.0,<2.0",
     "python-dotenv>=1.0,<2.0",
+    # Export (docs/build-plan.md D4): reportlab is pure Python, so Render
+    # needs no system packages for the PDF path (WeasyPrint would need
+    # cairo/pango). python-pptx has no meaningful alternative for PPTX.
+    "reportlab>=4.2,<5.0",
+    "python-pptx>=1.0,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +48,12 @@ extend-exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Query()/etc. are meant to be called in argument
+# defaults — that's the framework's dependency-injection idiom, not the
+# mutable-default-argument bug B008 otherwise flags.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
