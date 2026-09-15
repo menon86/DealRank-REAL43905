@@ -33,10 +33,24 @@ class Deal(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sub_asset_class: Mapped[SubAssetClass] = mapped_column(
-        Enum(SubAssetClass, name="sub_asset_class"), nullable=False
+        Enum(
+            SubAssetClass,
+            name="sub_asset_class",
+            # Without this, SQLAlchemy stores each member's .name
+            # ("STUDENT_HOUSING") instead of its .value
+            # ("student_housing") — the migration's Postgres enum only
+            # accepts the lowercase values, so every insert would fail.
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
     )
     leasing_mode: Mapped[LeasingMode] = mapped_column(
-        Enum(LeasingMode, name="leasing_mode"), nullable=False
+        Enum(
+            LeasingMode,
+            name="leasing_mode",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
     )
 
     # --- GPR inputs (exactly one branch populated per leasing_mode) ---
