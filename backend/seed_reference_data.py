@@ -59,7 +59,9 @@ SEED_CAP_RATE_SPREADS = [
     ),
     CapRateSpread(
         sub_asset_class="suburban_garden",
-        survey_source="CBRE U.S. Cap Rate Survey H1 2026 (Multifamily Suburban, Class A Stabilized)",
+        survey_source=(
+            "CBRE U.S. Cap Rate Survey H1 2026 (Multifamily Suburban, Class A Stabilized)"
+        ),
         survey_quarter="2026H1",
         spread_bps=61,  # mean metro midpoint 5.21% - 10yr Treasury 4.60%
         assumed_stabilized_noi_growth=Decimal("0.0140"),  # Yardi Matrix, Aug 5 2026 press release
@@ -67,10 +69,14 @@ SEED_CAP_RATE_SPREADS = [
     ),
     CapRateSpread(
         sub_asset_class="student_housing",
-        survey_source="Berkadia 2026 U.S. Student Housing Market Report (national avg. cap rate, 2025 sales)",
+        survey_source=(
+            "Berkadia 2026 U.S. Student Housing Market Report "
+            "(national avg. cap rate, 2025 sales)"
+        ),
         survey_quarter="2025",
         spread_bps=130,  # national avg cap rate 5.90% - 10yr Treasury 4.60%
-        assumed_stabilized_noi_growth=Decimal("0.0200"),  # Yardi Matrix Student Housing Report, Sept 2026
+        # Yardi Matrix Student Housing Report, Sept 2026
+        assumed_stabilized_noi_growth=Decimal("0.0200"),
         effective_date=date(2026, 2, 6),  # Berkadia's stated as-of date for its 2025 sales data
     ),
 ]
