@@ -1,9 +1,10 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.config import get_settings
+from app.config import normalize_database_url
 from app.models import Base
 
 config = context.config
@@ -11,9 +12,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Via Settings (not os.environ) so Render's postgres:// URL gets the same
-# psycopg3 driver normalization the app uses.
-config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL.replace("%", "%%"))
+# Read the environment at run time (tests point DATABASE_URL at a scratch
+# database), normalized the same way the app's Settings does.
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    config.set_main_option(
+        "sqlalchemy.url", normalize_database_url(database_url).replace("%", "%%")
+    )
 
 target_metadata = Base.metadata
 

@@ -10,6 +10,17 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def normalize_database_url(url: str) -> str:
+    """Render (and Heroku-style hosts) hand out postgres:// or
+    postgresql:// URLs, which SQLAlchemy resolves to psycopg2. This
+    project installs psycopg 3, so pin the driver explicitly.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -22,14 +33,7 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL")
     @classmethod
     def _use_psycopg3_driver(cls, url: str) -> str:
-        """Render (and Heroku-style hosts) hand out postgres:// or
-        postgresql:// URLs, which SQLAlchemy resolves to psycopg2. This
-        project installs psycopg 3, so pin the driver explicitly.
-        """
-        for prefix in ("postgres://", "postgresql://"):
-            if url.startswith(prefix):
-                return "postgresql+psycopg://" + url[len(prefix) :]
-        return url
+        return normalize_database_url(url)
 
     @property
     def cors_origins_list(self) -> list[str]:
