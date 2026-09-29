@@ -52,3 +52,29 @@ def test_pdf_report_unknown_deal_id_is_404(client):
 def test_report_requires_at_least_one_deal_id(client):
     resp = client.get("/reports/pdf", params={"hurdle_rate": "0.08"})
     assert resp.status_code == 422
+
+
+def test_pptx_tables_fit_on_their_slides_at_five_deals(client):
+    """Every table's stored geometry has to end inside the slide. The
+    assumptions table used to end at 7.65" on a 7.5" slide, which nothing
+    caught because the file still opened; five deals is the most the UI
+    lets you compare, so the comparison slide is checked at its widest."""
+    import io
+
+    from pptx import Presentation
+
+    deal_ids = _seed_two_deals(client) + _seed_two_deals(client)
+    deal_ids.append(client.post("/deals", json=STUDENT_HOUSING_PAYLOAD).json()["id"])
+
+    resp = client.get(
+        "/reports/pptx", params=[("deal_ids", i) for i in deal_ids] + [("hurdle_rate", "0.08")]
+    )
+    assert resp.status_code == 200
+
+    prs = Presentation(io.BytesIO(resp.content))
+    tables = [shape for slide in prs.slides for shape in slide.shapes if shape.has_table]
+    assert tables
+    for shape in tables:
+        table = shape.table
+        assert shape.top + sum(row.height for row in table.rows) <= prs.slide_height
+        assert shape.left + sum(col.width for col in table.columns) <= prs.slide_width

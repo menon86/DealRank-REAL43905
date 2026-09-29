@@ -107,39 +107,114 @@ def _format_assumption_value(field: str, value: object) -> str:
     return str(value)
 
 
+# Letter width minus the 0.6" margins set in build_pdf_bytes.
+_CONTENT_WIDTH = 7.3 * inch
+_LABEL_COL_WIDTH = 1.6 * inch
+
+_HEADER_CELL = ParagraphStyle(
+    "DealRankHeaderCell",
+    parent=_STYLES["BodyText"],
+    fontName="Helvetica-Bold",
+    fontSize=8,
+    leading=9.5,
+    spaceBefore=0,
+    spaceAfter=0,
+    textColor=colors.white,
+)
+_HEADER_CELL_RIGHT = ParagraphStyle("DealRankHeaderCellRight", parent=_HEADER_CELL, alignment=2)
+_BODY_CELL = ParagraphStyle(
+    "DealRankBodyCell",
+    parent=_STYLES["BodyText"],
+    fontSize=8,
+    leading=9.5,
+    spaceBefore=0,
+    spaceAfter=0,
+)
+
+_ACCENT_BG = colors.HexColor("#eef2fa")
+_SECTION_TEXT = colors.HexColor("#5b6474")
+
+_RANKING_BASIS_LABEL = "Unlevered IRR (ranking basis)"
+
+
 def _comparison_table(entries: list[RankedEntry]) -> Table:
-    rows: list[list[str]] = [["Deal"] + [e.deal.name for e in entries]]
+    # Deal names and row labels are Paragraphs, not plain strings, so
+    # they wrap inside their cell instead of overprinting the next column
+    # once there are 4-5 deals on the page.
+    rows: list[list] = [
+        [Paragraph("Deal", _HEADER_CELL)]
+        + [Paragraph(e.deal.name, _HEADER_CELL_RIGHT) for e in entries]
+    ]
+    section_rows: list[int] = []
+    bold_rows: list[int] = []
 
-    def row(label: str, extractor) -> list[str]:
-        return [label] + [extractor(e) for e in entries]
+    def section(label: str) -> None:
+        section_rows.append(len(rows))
+        rows.append([label.upper()] + [""] * len(entries))
 
-    rows.append(row("Hold period", lambda e: f"{e.deal.hold_period_years} yrs"))
-    rows.append(row("Gross potential rent", lambda e: money(e.metrics.annual_cash_flows[0].gpr)))
-    rows.append(row("Vacancy loss", lambda e: money(e.metrics.annual_cash_flows[0].vacancy_loss)))
-    rows.append(row("Effective gross income", lambda e: money(e.metrics.annual_cash_flows[0].egi)))
-    rows.append(row("Operating expenses", lambda e: money(e.metrics.annual_cash_flows[0].opex)))
-    rows.append(
-        row("Turnover expense", lambda e: money(e.metrics.annual_cash_flows[0].turnover_expense))
+    def row(label: str, extractor, bold: bool = False) -> None:
+        if bold:
+            bold_rows.append(len(rows))
+        rows.append([Paragraph(label, _BODY_CELL)] + [extractor(e) for e in entries])
+
+    def year_one(e: RankedEntry):
+        return e.metrics.annual_cash_flows[0]
+
+    row("Hold period", lambda e: f"{e.deal.hold_period_years} yrs")
+    section("Year 1 waterfall")
+    row("Gross potential rent", lambda e: money(year_one(e).gpr))
+    row("Less: vacancy loss", lambda e: money(year_one(e).vacancy_loss))
+    row("Effective gross income", lambda e: money(year_one(e).egi), bold=True)
+    row("Less: operating expenses", lambda e: money(year_one(e).opex))
+    row("Less: turnover expense", lambda e: money(year_one(e).turnover_expense))
+    row("Year 1 NOI", lambda e: money(e.metrics.year_one_noi), bold=True)
+    row("Debt service", lambda e: money(year_one(e).debt_service))
+    section("Headline metrics")
+    ranking_basis_row = len(rows)
+    row(_RANKING_BASIS_LABEL, lambda e: percent(e.metrics.unlevered_irr), bold=True)
+    row("Levered IRR (reference)", lambda e: percent(e.metrics.levered_irr))
+    row("Going-in cap rate", lambda e: percent(e.metrics.going_in_cap_rate))
+    row("Year 1 DSCR", lambda e: number(e.metrics.year_one_dscr))
+    row("Cash-on-cash", lambda e: percent(e.metrics.cash_on_cash))
+    row("Equity multiple", lambda e: multiple(e.metrics.equity_multiple))
+    row("Exit value", lambda e: money(e.metrics.exit_value))
+    row("Net sale proceeds", lambda e: money(e.metrics.net_sale_proceeds))
+
+    deal_col_width = (_CONTENT_WIDTH - _LABEL_COL_WIDTH) / len(entries)
+    table = Table(rows, colWidths=[_LABEL_COL_WIDTH] + [deal_col_width] * len(entries))
+
+    style = TableStyle(_TABLE_STYLE.getCommands())
+    for r in section_rows:
+        style.add("SPAN", (0, r), (-1, r))
+        style.add("BACKGROUND", (0, r), (-1, r), colors.white)
+        style.add("TEXTCOLOR", (0, r), (-1, r), _SECTION_TEXT)
+        style.add("FONTNAME", (0, r), (-1, r), "Helvetica-Bold")
+        style.add("FONTSIZE", (0, r), (-1, r), 7)
+        style.add("ALIGN", (0, r), (-1, r), "LEFT")
+    for r in bold_rows:
+        style.add("FONTNAME", (1, r), (-1, r), "Helvetica-Bold")
+    style.add("BACKGROUND", (0, ranking_basis_row), (-1, ranking_basis_row), _ACCENT_BG)
+    style.add(
+        "LINEBEFORE",
+        (0, ranking_basis_row),
+        (0, ranking_basis_row),
+        2.5,
+        colors.HexColor("#1f4b99"),
     )
-    rows.append(row("Year 1 NOI", lambda e: money(e.metrics.year_one_noi)))
-    rows.append(row("Debt service", lambda e: money(e.metrics.annual_cash_flows[0].debt_service)))
-    rows.append(row("Going-in cap rate", lambda e: percent(e.metrics.going_in_cap_rate)))
-    rows.append(row("Year 1 DSCR", lambda e: number(e.metrics.year_one_dscr)))
-    rows.append(row("Cash-on-cash", lambda e: percent(e.metrics.cash_on_cash)))
-    rows.append(row("Unlevered IRR", lambda e: percent(e.metrics.unlevered_irr)))
-    rows.append(row("Levered IRR", lambda e: percent(e.metrics.levered_irr)))
-    rows.append(row("Equity multiple", lambda e: multiple(e.metrics.equity_multiple)))
-    rows.append(row("Exit value", lambda e: money(e.metrics.exit_value)))
-    rows.append(row("Net sale proceeds", lambda e: money(e.metrics.net_sale_proceeds)))
-
-    col_width = (6.5 * inch) / (len(entries) + 1)
-    table = Table(rows, colWidths=[col_width] * (len(entries) + 1))
-    table.setStyle(_TABLE_STYLE)
+    table.setStyle(style)
     return table
 
 
 def _ranking_table(entries: list[RankedEntry]) -> Table:
-    rows = [["Rank", "Deal", "Unlevered IRR", "Levered IRR", "Spread vs. hurdle"]]
+    rows: list[list] = [
+        [
+            Paragraph("Rank", _HEADER_CELL),
+            Paragraph("Deal", _HEADER_CELL),
+            Paragraph(_RANKING_BASIS_LABEL, _HEADER_CELL_RIGHT),
+            Paragraph("Levered IRR (reference)", _HEADER_CELL_RIGHT),
+            Paragraph("Spread vs. hurdle", _HEADER_CELL_RIGHT),
+        ]
+    ]
     for entry in entries:
         spread_str = (
             "n/a (non-converging)"
@@ -149,14 +224,17 @@ def _ranking_table(entries: list[RankedEntry]) -> Table:
         rows.append(
             [
                 f"#{entry.rank}",
-                entry.deal.name,
+                Paragraph(entry.deal.name, _BODY_CELL),
                 percent(entry.metrics.unlevered_irr),
                 percent(entry.metrics.levered_irr),
                 spread_str,
             ]
         )
-    table = Table(rows, colWidths=[0.5 * inch, 2.3 * inch, 1.2 * inch, 1.2 * inch, 1.3 * inch])
-    table.setStyle(_TABLE_STYLE)
+    table = Table(rows, colWidths=[0.5 * inch, 2.8 * inch, 1.4 * inch, 1.3 * inch, 1.3 * inch])
+    style = TableStyle(_TABLE_STYLE.getCommands())
+    style.add("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold")
+    style.add("FONTNAME", (4, 1), (4, -1), "Helvetica-Bold")
+    table.setStyle(style)
     return table
 
 
@@ -182,8 +260,8 @@ def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
         _comparison_table(entries),
         Spacer(1, 0.2 * inch),
         Paragraph(
-            "Both unlevered and levered IRR are shown; ranking below is based on unlevered "
-            "IRR against the hurdle rate above.",
+            "Both IRRs are shown. Ranking (below) uses unlevered IRR only, against the "
+            "hurdle rate above; levered IRR is for reference and is never sorted on.",
             _NOTE,
         ),
         Spacer(1, 0.3 * inch),
