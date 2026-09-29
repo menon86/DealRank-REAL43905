@@ -112,7 +112,7 @@ function parseRankedDealOut(raw: RankedDealOut): RankedDealOut {
   };
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     method: string,
     path: string,
@@ -187,12 +187,75 @@ export async function rank(dealIds: string[], hurdleRate: number): Promise<Ranke
 }
 
 /**
- * GET /reports/pdf and GET /reports/pptx (docs/build-plan.md 6.4) are
- * plain file downloads, not JSON — build the URL and let a plain <a
- * href> trigger the browser's normal download flow (the
- * Content-Disposition: attachment header on the response does the rest)
- * rather than fetching the bytes here.
+ * Turns anything a client call can throw into one sentence a user can
+ * act on. FastAPI error bodies are {"detail": "..."} (a string for 404s,
+ * a list of field errors for 422s); a TypeError from fetch itself means
+ * the request never reached the backend at all.
  */
+export function describeError(err: unknown): string {
+  if (err instanceof ApiError) {
+    let detail = err.body;
+    try {
+      const parsed = JSON.parse(err.body) as { detail?: unknown };
+      if (typeof parsed.detail === "string") {
+        detail = parsed.detail;
+      } else if (Array.isArray(parsed.detail)) {
+        detail = parsed.detail
+          .map((d: { msg?: string }) => d.msg)
+          .filter(Boolean)
+          .join("; ");
+      }
+    } catch {
+      // Not JSON (e.g. a proxy's HTML error page) — fall back to status only.
+      detail = "";
+    }
+    return detail ? `Server returned ${err.status}: ${detail}` : `Server returned ${err.status}.`;
+  }
+  if (err instanceof TypeError) {
+    return "Couldn't reach the DealRank API — is the backend running?";
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+const REPORT_FILENAMES: Record<"pdf" | "pptx", string> = {
+  pdf: "dealrank-comparison.pdf",
+  pptx: "dealrank-comparison.pptx",
+};
+
+/**
+ * GET /reports/pdf and GET /reports/pptx (docs/build-plan.md 6.4).
+ * Fetched here rather than linked with a plain <a href> so the download
+ * buttons can show a loading state while the server renders the file and
+ * a real error message if it fails — a bare link to a 404/422 just
+ * navigated the tab to a JSON error body. The bytes are handed to the
+ * browser's normal download flow through a temporary object URL.
+ */
+export async function downloadReport(
+  kind: "pdf" | "pptx",
+  dealIds: string[],
+  hurdleRate: number,
+): Promise<void> {
+  const url = buildReportUrl(kind, dealIds, hurdleRate);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new ApiError("GET", `/reports/${kind}`, res.status, await res.text());
+  }
+  const blob = await res.blob();
+  if (blob.size === 0) {
+    throw new Error(`The ${kind.toUpperCase()} report came back empty.`);
+  }
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = REPORT_FILENAMES[kind];
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoke on the next tick so the browser has started the download.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+/** The report endpoint URL for a given selection and hurdle rate. */
 export function buildReportUrl(
   kind: "pdf" | "pptx",
   dealIds: string[],
