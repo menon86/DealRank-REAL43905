@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.ranking_data import RANKING_BASIS_NOTE
 from app.models.deal import LeasingMode, SubAssetClass
@@ -20,31 +20,31 @@ class DealBase(BaseModel):
     sub_asset_class: SubAssetClass
     leasing_mode: LeasingMode
 
-    unit_count: int | None = None
-    monthly_rent_per_unit: Decimal | None = None
-    bed_count: int | None = None
-    monthly_rent_per_bed: Decimal | None = None
+    unit_count: int | None = Field(default=None, gt=0)
+    monthly_rent_per_unit: Decimal | None = Field(default=None, ge=0)
+    bed_count: int | None = Field(default=None, gt=0)
+    monthly_rent_per_bed: Decimal | None = Field(default=None, ge=0)
 
-    vacancy_rate: Decimal
-    other_income_annual: Decimal = Decimal("0")
+    vacancy_rate: Decimal = Field(ge=0, le=1)
+    other_income_annual: Decimal = Field(default=Decimal("0"), ge=0)
 
-    opex_annual: Decimal
-    expense_growth_rate: Decimal
-    rent_growth_rate: Decimal
+    opex_annual: Decimal = Field(ge=0)
+    expense_growth_rate: Decimal = Field(gt=-1, le=1)
+    rent_growth_rate: Decimal = Field(gt=-1, le=1)
 
-    lease_expiration_month: int = 8
-    turnover_cost_per_unit_or_bed: Decimal
-    annual_turnover_rate: Decimal
+    lease_expiration_month: int = Field(default=8, ge=1, le=12)
+    turnover_cost_per_unit_or_bed: Decimal = Field(ge=0)
+    annual_turnover_rate: Decimal = Field(ge=0, le=1)
 
-    purchase_price: Decimal
-    closing_costs: Decimal
-    loan_amount: Decimal
-    interest_rate: Decimal
-    amortization_years: int
+    purchase_price: Decimal = Field(gt=0)
+    closing_costs: Decimal = Field(ge=0)
+    loan_amount: Decimal = Field(ge=0)
+    interest_rate: Decimal = Field(ge=0, le=1)
+    amortization_years: int = Field(gt=0, le=50)
 
-    hold_period_years: int
-    exit_cap_rate: Decimal
-    selling_costs_rate: Decimal
+    hold_period_years: int = Field(gt=0, le=30)
+    exit_cap_rate: Decimal = Field(gt=0, le=1)
+    selling_costs_rate: Decimal = Field(ge=0, lt=1)
 
     @model_validator(mode="after")
     def _leasing_mode_matches_populated_branch(self) -> "DealBase":
@@ -53,6 +53,8 @@ class DealBase(BaseModel):
         leasing_mode. Raised as a plain ValueError so FastAPI turns it
         into a 422 naming the offending field.
         """
+        if self.loan_amount > self.purchase_price:
+            raise ValueError("loan_amount cannot exceed purchase_price")
         if self.leasing_mode is LeasingMode.PER_UNIT:
             if self.unit_count is None or self.monthly_rent_per_unit is None:
                 raise ValueError(
@@ -166,7 +168,7 @@ class MetricsOut(BaseModel):
 
 
 class RankRequest(BaseModel):
-    deal_ids: list[uuid.UUID]
+    deal_ids: list[uuid.UUID] = Field(min_length=1)
     hurdle_rate: Decimal
 
 

@@ -7,6 +7,8 @@ rather than only in-process.
 import uuid
 from decimal import Decimal
 
+import pytest
+
 from tests.api.payloads import STUDENT_HOUSING_PAYLOAD, SUBURBAN_GARDEN_PAYLOAD
 
 
@@ -127,3 +129,29 @@ def test_metrics_matches_golden_fixture_through_the_api(client):
     assert Decimal(metrics["year_one_noi"]) == Decimal("1375000.0000")
     assert len(metrics["annual_cash_flows"]) == 7
     assert Decimal(metrics["annual_cash_flows"][0]["noi"]) == Decimal("1375000.0000")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("exit_cap_rate", "0"),
+        ("purchase_price", "0"),
+        ("amortization_years", 0),
+        ("hold_period_years", 0),
+        ("vacancy_rate", "1.5"),
+        ("monthly_rent_per_bed", "-1"),
+        ("loan_amount", "999999999.00"),
+    ],
+)
+def test_create_rejects_out_of_range_values(client, field, value):
+    """Values that would otherwise divide by zero or produce nonsense are
+    rejected with a 422 instead of surfacing as a 500 from the engine.
+    """
+    payload = {**STUDENT_HOUSING_PAYLOAD, field: value}
+    assert client.post("/deals", json=payload).status_code == 422
+
+
+def test_patch_rejects_out_of_range_value(client):
+    created = client.post("/deals", json=STUDENT_HOUSING_PAYLOAD).json()
+    resp = client.patch(f"/deals/{created['id']}", json={"exit_cap_rate": "0"})
+    assert resp.status_code == 422
