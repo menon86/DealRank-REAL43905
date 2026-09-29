@@ -6,6 +6,7 @@ here without updating that file too.
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,18 @@ class Settings(BaseSettings):
     APP_NAME: str = "DealRank"
     LOG_LEVEL: str = "info"
     CORS_ORIGINS: str = "http://localhost:5173"
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _use_psycopg3_driver(cls, url: str) -> str:
+        """Render (and Heroku-style hosts) hand out postgres:// or
+        postgresql:// URLs, which SQLAlchemy resolves to psycopg2. This
+        project installs psycopg 3, so pin the driver explicitly.
+        """
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix) :]
+        return url
 
     @property
     def cors_origins_list(self) -> list[str]:
