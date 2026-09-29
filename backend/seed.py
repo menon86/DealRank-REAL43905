@@ -93,9 +93,9 @@ SEED_DEALS = [
 
 def normalize_database_url(url: str) -> str:
     if url.startswith("postgres://"):
-        return "postgresql+psycopg://" + url[len("postgres://"):]
+        return "postgresql+psycopg://" + url[len("postgres://") :]
     if url.startswith("postgresql://") and not url.startswith("postgresql+psycopg://"):
-        return "postgresql+psycopg://" + url[len("postgresql://"):]
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
     return url
 
 
