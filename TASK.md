@@ -1,46 +1,47 @@
-# TASK: Cap rate & market data setup
+# TASK: UI/UX — Deal form & deal list
 
 ## Why
-The charter's Tech Plan lists the cap rate spread lookup table and market rent
-reference table as two of the three DB surfaces for this app. Neither is
-*consumed* by the ranking engine in Deliverable 2 (that's D3's
-Treasury+spread hurdle — see `app/engine/ranking.py`'s docstring and
-`docs/build-plan.md` section 1), but the tables should be seeded with real
-data now so D3 isn't blocked on data-gathering later, and so deployment ships
-with the DB layer the charter describes as complete.
+The core MVP flow (build, form fields, API wiring) already works end to end
+— this is polish, not new functionality. Grading likely weighs on the app
+being pleasant and clear to actually use, not just functionally correct.
 
-**Do not wire this into the D2 ranking logic.** `POST /rank` stays on the
-single user-entered hurdle rate. This task is data-only.
+## Where
+- `frontend/src/components/DealForm.tsx`
+- `frontend/src/components/DealList.tsx`
+- Shared CSS: `frontend/src/styles.css`
 
 ## What to do
 
-1. **Get the source reports** (gated behind download forms, not freely
-   fetchable — you'll need to actually download them):
-   - CBRE U.S. Cap Rate Survey, H1 2026 — https://www.cbre.com/insights/reports/us-cap-rate-survey-h1-2026
-   - Berkadia 2026 U.S. Student Housing Market Report — https://www.berkadia.com/lp/2026-us-student-housing-market-report/
-   - (JLL multifamily cap rate survey as a cross-check if available)
+1. **Leasing-mode toggle clarity.** The per-unit vs. per-bed switch changes
+   which fields are live (units/rent-per-unit vs. beds/rent-per-bed). Make
+   sure it's visually obvious which mode is active and which fields are
+   irrelevant/hidden in the other mode — right now this is functional but
+   worth a pass for a first-time user.
 
-2. **Transcribe cap-rate-to-Treasury spreads** for the three sub-asset
-   classes used in this app (`student_housing`, `suburban_garden`,
-   `urban_midrise` — see `backend/app/models/deal.py`'s `SubAssetClass`
-   enum) into `backend/app/models/cap_rate_spread.py`'s schema:
-   - `sub_asset_class`, `survey_source`, `survey_quarter` (e.g. `"2026H1"`),
-     `spread_bps`, `assumed_stabilized_noi_growth`, `effective_date`.
-   - Note which published figure each row came from — this becomes the D3
-     provenance memo's source list, so don't discard the citation.
+2. **Validation & error states.** `DealForm.tsx` should mirror the API's 422
+   rules client-side (per D7 in `docs/build-plan.md`: percentages are whole
+   numbers in the UI, decimal fractions behind the API boundary — don't
+   break that conversion). Add inline field-level error messages instead of
+   relying on a failed submit.
 
-3. **Write a seed script or migration** that inserts these rows into
-   `cap_rate_spreads`. Follow the existing pattern in `backend/seed.py`
-   (currently seeds `deals` only) — either extend that script or add a
-   sibling `seed_reference_data.py`, whichever reads cleaner.
+3. **Empty states.** What does `DealList.tsx` show with zero deals? Should
+   prompt toward "Add deal," not just render an empty table.
 
-4. **Optional, same pattern:** seed `market_rents`
-   (`backend/app/models/market_rent.py`) from Zillow Research / Apartment
-   List CSVs if time allows. Not required for D2 submission.
+4. **Responsive layout.** Check the form and list at narrower widths —
+   they're likely fine on desktop but unverified below ~900px.
+
+5. **Field grouping/labels.** Group related inputs (e.g. all debt terms
+   together, all growth-rate assumptions together) with clear section
+   labels so the form reads as sections, not one long list.
+
+## Constraints
+- Hand-written CSS only, per D5 in `docs/build-plan.md` — no component
+  library.
+- Don't touch `frontend/src/lib/client.ts` or the API contract unless a bug
+  surfaces; this task is presentation-layer only.
 
 ## Acceptance
-- `cap_rate_spreads` has one row per sub-asset class, each traceable to a
-  named, dated published source — no fabricated numbers.
-- Seeding is scripted and repeatable (re-running it against a fresh DB
-  reproduces the same rows), not a one-off manual `INSERT`.
-- Nothing in `app/engine/` or `app/api/rank.py` changes.
+- A first-time user can fill out a per-bed student housing deal and a
+  per-unit suburban garden deal without confusion about which fields apply.
+- Invalid input shows a clear, field-level message before submit.
+- Looks intentional at both desktop and ~400px width.

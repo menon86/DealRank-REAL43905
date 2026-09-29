@@ -147,6 +147,16 @@ body {
   color: var(--color-negative);
 }
 
+.field-error-text {
+  font-size: 11px;
+  color: var(--color-negative);
+}
+
+.field input[aria-invalid="true"],
+.field select[aria-invalid="true"] {
+  border-color: var(--color-negative);
+}
+
 .leasing-toggle {
   display: flex;
   gap: 8px;
@@ -651,6 +661,12 @@ table.ranking-table tbody tr.rank-1 td.deal-cell {
   width: 140px;
 }
 
+.deal-list-row .deal-price {
+  width: 130px;
+  text-align: right;
+  font-size: 13px;
+}
+
 .badge {
   display: inline-block;
   background: var(--color-accent-bg);
@@ -666,6 +682,10 @@ table.ranking-table tbody tr.rank-1 td.deal-cell {
   font-size: 14px;
   padding: 24px 0;
   text-align: center;
+}
+
+.empty-state p {
+  margin: 0 0 14px;
 }
 
 .hurdle-input {
@@ -701,4 +721,35 @@ table.ranking-table tbody tr.rank-1 td.deal-cell {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    padding: 16px 16px 48px;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
+  .deal-list-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .deal-list-row .name {
+    flex-basis: 100%;
+    order: 1;
+  }
+
+  .deal-list-row .sub-class {
+    width: auto;
+    order: 3;
+  }
+
+  .deal-list-row .deal-price {
+    width: auto;
+    order: 2;
+    margin-left: auto;
+  }
 }
