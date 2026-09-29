@@ -83,6 +83,114 @@ function dealToFormState(deal: DealOut): FormState {
   };
 }
 
+type FieldErrors = Partial<Record<keyof FormState, string>>;
+
+function isBlank(value: string): boolean {
+  return value.trim() === "";
+}
+
+function parseNumber(value: string): number | null {
+  const parsed = Number(value);
+  return value.trim() !== "" && Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Mirrors the constraints the API actually enforces (backend/app/api/schemas.py:
+ * required numeric fields, the per_unit/per_bed branch-consistency validator)
+ * plus sane range checks the API doesn't bother with server-side but a form
+ * should catch before a submit round-trip.
+ */
+function validate(form: FormState): FieldErrors {
+  const errors: FieldErrors = {};
+  const isPerUnit = form.leasing_mode === "per_unit";
+
+  if (isBlank(form.name)) errors.name = "Name is required.";
+
+  if (isPerUnit) {
+    const units = parseNumber(form.unit_count);
+    if (units === null || units <= 0) errors.unit_count = "Enter a positive unit count.";
+    const rent = parseNumber(form.monthly_rent_per_unit);
+    if (rent === null || rent <= 0) errors.monthly_rent_per_unit = "Enter a positive rent.";
+  } else {
+    const beds = parseNumber(form.bed_count);
+    if (beds === null || beds <= 0) errors.bed_count = "Enter a positive bed count.";
+    const rent = parseNumber(form.monthly_rent_per_bed);
+    if (rent === null || rent <= 0) errors.monthly_rent_per_bed = "Enter a positive rent.";
+  }
+
+  const vacancy = parseNumber(form.vacancy_rate_pct);
+  if (vacancy === null || vacancy < 0 || vacancy > 100) {
+    errors.vacancy_rate_pct = "Enter a percentage between 0 and 100.";
+  }
+
+  if (!isBlank(form.other_income_annual)) {
+    const otherIncome = parseNumber(form.other_income_annual);
+    if (otherIncome === null || otherIncome < 0) {
+      errors.other_income_annual = "Enter a non-negative amount.";
+    }
+  }
+
+  const opex = parseNumber(form.opex_annual);
+  if (opex === null || opex < 0) errors.opex_annual = "Enter a non-negative amount.";
+
+  if (parseNumber(form.expense_growth_rate_pct) === null) {
+    errors.expense_growth_rate_pct = "Enter a percentage.";
+  }
+  if (parseNumber(form.rent_growth_rate_pct) === null) {
+    errors.rent_growth_rate_pct = "Enter a percentage.";
+  }
+
+  const month = parseNumber(form.lease_expiration_month);
+  if (month === null || month < 1 || month > 12 || !Number.isInteger(month)) {
+    errors.lease_expiration_month = "Enter a month from 1 to 12.";
+  }
+
+  const turnoverCost = parseNumber(form.turnover_cost_per_unit_or_bed);
+  if (turnoverCost === null || turnoverCost < 0) {
+    errors.turnover_cost_per_unit_or_bed = "Enter a non-negative amount.";
+  }
+  const turnoverRate = parseNumber(form.annual_turnover_rate_pct);
+  if (turnoverRate === null || turnoverRate < 0 || turnoverRate > 100) {
+    errors.annual_turnover_rate_pct = "Enter a percentage between 0 and 100.";
+  }
+
+  const price = parseNumber(form.purchase_price);
+  if (price === null || price <= 0) errors.purchase_price = "Enter a positive amount.";
+
+  const closingCosts = parseNumber(form.closing_costs);
+  if (closingCosts === null || closingCosts < 0) {
+    errors.closing_costs = "Enter a non-negative amount.";
+  }
+
+  const loanAmount = parseNumber(form.loan_amount);
+  if (loanAmount === null || loanAmount < 0) errors.loan_amount = "Enter a non-negative amount.";
+
+  const interestRate = parseNumber(form.interest_rate_pct);
+  if (interestRate === null || interestRate < 0) {
+    errors.interest_rate_pct = "Enter a non-negative percentage.";
+  }
+
+  const amortYears = parseNumber(form.amortization_years);
+  if (amortYears === null || amortYears <= 0 || !Number.isInteger(amortYears)) {
+    errors.amortization_years = "Enter a positive whole number of years.";
+  }
+
+  const holdYears = parseNumber(form.hold_period_years);
+  if (holdYears === null || holdYears <= 0 || !Number.isInteger(holdYears)) {
+    errors.hold_period_years = "Enter a positive whole number of years.";
+  }
+
+  const exitCap = parseNumber(form.exit_cap_rate_pct);
+  if (exitCap === null || exitCap <= 0) errors.exit_cap_rate_pct = "Enter a positive percentage.";
+
+  const sellingCosts = parseNumber(form.selling_costs_rate_pct);
+  if (sellingCosts === null || sellingCosts < 0) {
+    errors.selling_costs_rate_pct = "Enter a non-negative percentage.";
+  }
+
+  return errors;
+}
+
 interface DealFormProps {
   initial: DealOut | null;
   onSave: (input: DealCreate) => void;
@@ -91,31 +199,30 @@ interface DealFormProps {
 
 export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   const [form, setForm] = useState<FormState>(initial ? dealToFormState(initial) : DEFAULTS);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setFieldErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function fieldError(key: keyof FormState) {
+    return fieldErrors[key] ? <span className="field-error-text">{fieldErrors[key]}</span> : null;
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
 
-    if (!form.name.trim()) {
-      setError("Name is required.");
-      return;
-    }
+    const errors = validate(form);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     const isPerUnit = form.leasing_mode === "per_unit";
-    if (isPerUnit && (!form.unit_count || !form.monthly_rent_per_unit)) {
-      setError("Per-unit deals require unit count and monthly rent per unit.");
-      return;
-    }
-    if (!isPerUnit && (!form.bed_count || !form.monthly_rent_per_bed)) {
-      setError("Per-bed deals require bed count and monthly rent per bed.");
-      return;
-    }
-
     const input: DealCreate = {
       name: form.name.trim(),
       sub_asset_class: form.sub_asset_class,
@@ -160,7 +267,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
             placeholder="e.g. Campus View Student Housing"
+            aria-invalid={!!fieldErrors.name}
           />
+          {fieldError("name")}
         </div>
         <div className="field">
           <label htmlFor="sub_asset_class">Sub-asset class</label>
@@ -205,7 +314,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 type="number"
                 value={form.unit_count}
                 onChange={(e) => set("unit_count", e.target.value)}
+                aria-invalid={!!fieldErrors.unit_count}
               />
+              {fieldError("unit_count")}
             </div>
             <div className="field">
               <label htmlFor="monthly_rent_per_unit">Monthly rent / unit ($)</label>
@@ -214,7 +325,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 type="number"
                 value={form.monthly_rent_per_unit}
                 onChange={(e) => set("monthly_rent_per_unit", e.target.value)}
+                aria-invalid={!!fieldErrors.monthly_rent_per_unit}
               />
+              {fieldError("monthly_rent_per_unit")}
             </div>
           </>
         ) : (
@@ -226,7 +339,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 type="number"
                 value={form.bed_count}
                 onChange={(e) => set("bed_count", e.target.value)}
+                aria-invalid={!!fieldErrors.bed_count}
               />
+              {fieldError("bed_count")}
             </div>
             <div className="field">
               <label htmlFor="monthly_rent_per_bed">Monthly rent / bed ($)</label>
@@ -235,7 +350,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 type="number"
                 value={form.monthly_rent_per_bed}
                 onChange={(e) => set("monthly_rent_per_bed", e.target.value)}
+                aria-invalid={!!fieldErrors.monthly_rent_per_bed}
               />
+              {fieldError("monthly_rent_per_bed")}
             </div>
           </>
         )}
@@ -247,7 +364,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.vacancy_rate_pct}
             onChange={(e) => set("vacancy_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.vacancy_rate_pct}
           />
+          {fieldError("vacancy_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="other_income_annual">Other income, annual ($)</label>
@@ -256,7 +375,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.other_income_annual}
             onChange={(e) => set("other_income_annual", e.target.value)}
+            aria-invalid={!!fieldErrors.other_income_annual}
           />
+          {fieldError("other_income_annual")}
         </div>
       </div>
 
@@ -269,7 +390,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.opex_annual}
             onChange={(e) => set("opex_annual", e.target.value)}
+            aria-invalid={!!fieldErrors.opex_annual}
           />
+          {fieldError("opex_annual")}
         </div>
         <div className="field">
           <label htmlFor="expense_growth_rate_pct">Expense growth rate (%/yr)</label>
@@ -279,7 +402,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.expense_growth_rate_pct}
             onChange={(e) => set("expense_growth_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.expense_growth_rate_pct}
           />
+          {fieldError("expense_growth_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="rent_growth_rate_pct">Rent growth rate (%/yr)</label>
@@ -289,7 +414,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.rent_growth_rate_pct}
             onChange={(e) => set("rent_growth_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.rent_growth_rate_pct}
           />
+          {fieldError("rent_growth_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="lease_expiration_month">Lease expiration month (1–12)</label>
@@ -300,16 +427,22 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             max="12"
             value={form.lease_expiration_month}
             onChange={(e) => set("lease_expiration_month", e.target.value)}
+            aria-invalid={!!fieldErrors.lease_expiration_month}
           />
+          {fieldError("lease_expiration_month")}
         </div>
         <div className="field">
-          <label htmlFor="turnover_cost_per_unit_or_bed">Turnover cost / unit or bed ($)</label>
+          <label htmlFor="turnover_cost_per_unit_or_bed">
+            Turnover cost / {isPerUnit ? "unit" : "bed"} ($)
+          </label>
           <input
             id="turnover_cost_per_unit_or_bed"
             type="number"
             value={form.turnover_cost_per_unit_or_bed}
             onChange={(e) => set("turnover_cost_per_unit_or_bed", e.target.value)}
+            aria-invalid={!!fieldErrors.turnover_cost_per_unit_or_bed}
           />
+          {fieldError("turnover_cost_per_unit_or_bed")}
         </div>
         <div className="field">
           <label htmlFor="annual_turnover_rate_pct">Annual turnover rate (%)</label>
@@ -319,7 +452,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.annual_turnover_rate_pct}
             onChange={(e) => set("annual_turnover_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.annual_turnover_rate_pct}
           />
+          {fieldError("annual_turnover_rate_pct")}
         </div>
       </div>
 
@@ -332,7 +467,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.purchase_price}
             onChange={(e) => set("purchase_price", e.target.value)}
+            aria-invalid={!!fieldErrors.purchase_price}
           />
+          {fieldError("purchase_price")}
         </div>
         <div className="field">
           <label htmlFor="closing_costs">Closing costs ($)</label>
@@ -341,7 +478,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.closing_costs}
             onChange={(e) => set("closing_costs", e.target.value)}
+            aria-invalid={!!fieldErrors.closing_costs}
           />
+          {fieldError("closing_costs")}
         </div>
         <div className="field">
           <label htmlFor="loan_amount">Loan amount ($)</label>
@@ -350,7 +489,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.loan_amount}
             onChange={(e) => set("loan_amount", e.target.value)}
+            aria-invalid={!!fieldErrors.loan_amount}
           />
+          {fieldError("loan_amount")}
         </div>
         <div className="field">
           <label htmlFor="interest_rate_pct">Interest rate (%)</label>
@@ -360,7 +501,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.01"
             value={form.interest_rate_pct}
             onChange={(e) => set("interest_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.interest_rate_pct}
           />
+          {fieldError("interest_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="amortization_years">Amortization (years)</label>
@@ -369,7 +512,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.amortization_years}
             onChange={(e) => set("amortization_years", e.target.value)}
+            aria-invalid={!!fieldErrors.amortization_years}
           />
+          {fieldError("amortization_years")}
         </div>
       </div>
 
@@ -382,7 +527,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="number"
             value={form.hold_period_years}
             onChange={(e) => set("hold_period_years", e.target.value)}
+            aria-invalid={!!fieldErrors.hold_period_years}
           />
+          {fieldError("hold_period_years")}
         </div>
         <div className="field">
           <label htmlFor="exit_cap_rate_pct">Exit cap rate (%)</label>
@@ -392,7 +539,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.01"
             value={form.exit_cap_rate_pct}
             onChange={(e) => set("exit_cap_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.exit_cap_rate_pct}
           />
+          {fieldError("exit_cap_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="selling_costs_rate_pct">Selling costs rate (%)</label>
@@ -402,11 +551,15 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.selling_costs_rate_pct}
             onChange={(e) => set("selling_costs_rate_pct", e.target.value)}
+            aria-invalid={!!fieldErrors.selling_costs_rate_pct}
           />
+          {fieldError("selling_costs_rate_pct")}
         </div>
       </div>
 
-      {error && <p className="field error">{error}</p>}
+      {Object.keys(fieldErrors).length > 0 && (
+        <p className="field error">Please fix the highlighted fields above.</p>
+      )}
 
       <div className="form-actions">
         <button type="submit" className="primary">
