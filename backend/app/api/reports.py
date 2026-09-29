@@ -16,7 +16,7 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 @router.get("/pdf")
 def get_pdf_report(
-    deal_ids: list[uuid.UUID] = Query(...),
+    deal_ids: list[uuid.UUID] = Query(..., min_length=1),
     hurdle_rate: Decimal = Query(...),
     db: Session = Depends(get_db),
 ) -> Response:
@@ -31,7 +31,7 @@ def get_pdf_report(
 
 @router.get("/pptx")
 def get_pptx_report(
-    deal_ids: list[uuid.UUID] = Query(...),
+    deal_ids: list[uuid.UUID] = Query(..., min_length=1),
     hurdle_rate: Decimal = Query(...),
     db: Session = Depends(get_db),
 ) -> Response:

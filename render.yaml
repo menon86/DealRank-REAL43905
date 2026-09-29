@@ -52,9 +52,11 @@ services:
     name: dealrank-frontend
     runtime: static
     rootDir: frontend
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
+      - key: NODE_VERSION
+        value: "20"
       - key: VITE_API_BASE_URL
         value: https://dealrank-api.onrender.com
     routes:
