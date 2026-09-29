@@ -13,6 +13,10 @@ if config.config_file_name is not None:
 
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
+    if database_url.startswith("postgres://"):
+        database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+    elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+psycopg://"):
+        database_url = "postgresql+psycopg://" + database_url[len("postgresql://"):]
     config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata

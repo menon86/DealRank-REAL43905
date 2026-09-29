@@ -91,10 +91,23 @@ SEED_DEALS = [
 ]
 
 
+def normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://") and not url.startswith("postgresql+psycopg://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
 def main() -> None:
-    database_url = os.environ["DATABASE_URL"]
+    raw_url = os.environ["DATABASE_URL"]
+    database_url = normalize_database_url(raw_url)
     engine = create_engine(database_url)
     with Session(engine) as session:
+        existing_count = session.query(Deal).count()
+        if existing_count > 0:
+            print(f"Deals table already seeded ({existing_count} deals found). Skipping.")
+            return
         session.add_all(SEED_DEALS)
         session.commit()
     print(f"Seeded {len(SEED_DEALS)} deals.")
