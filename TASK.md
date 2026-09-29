@@ -33,7 +33,7 @@ Before deploying, several critical blockers and automation improvements were imp
    - This ensures requests from any Render preview, static site, or assigned custom subdomain are accepted without CORS blocking.
 
 4. **Frontend Node Engine Pinning**:
-   - Pinned `NODE_VERSION: "20.18.0"` in `render.yaml` under `dealrank-frontend` and placed `.nvmrc` in `frontend/` to satisfy `frontend/package.json`'s `"engines": { "node": ">=20 <21" }` constraint.
+   - Pinned `NODE_VERSION: "20"` in `render.yaml` under `dealrank-frontend` and placed `.nvmrc` in `frontend/` to satisfy `frontend/package.json`'s `"engines": { "node": ">=20 <21" }` constraint.
 
 5. **`CODEOWNERS` Housekeeping**:
    - Replaced placeholder `@methodology-owner` with `@menon86` in `CODEOWNERS`.
@@ -98,3 +98,24 @@ Add teammates as GitHub collaborators under **Settings → Collaborators**.
 - [ ] Blueprint applied on Render dashboard.
 - [ ] Live URL smoke tests verified.
 - [ ] `deliverable-2` tag pushed to `origin`.
+
+---
+
+# TASK: UI/UX — Deal form & deal list (Completed in PR #7)
+
+## Why
+The core MVP flow (build, form fields, API wiring) already works end to end
+— this is polish, not new functionality. Grading likely weighs on the app
+being pleasant and clear to actually use, not just functionally correct.
+
+## Where
+- `frontend/src/components/DealForm.tsx`
+- `frontend/src/components/DealList.tsx`
+- Shared CSS: `frontend/src/styles.css`
+
+## What was completed
+1. **Leasing-mode toggle clarity.** Visual distinction between active modes with conditional field display.
+2. **Validation & error states.** In-line field-level validation and clear error states.
+3. **Empty states.** Helpful call-to-action prompts when no deals are present.
+4. **Responsive layout.** Form and list responsive styling across various viewport widths.
+5. **Field grouping/labels.** Grouped inputs into logical sections with clear typography.

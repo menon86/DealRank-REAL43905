@@ -29,7 +29,12 @@ export function DealList({
       </p>
 
       {deals.length === 0 ? (
-        <div className="empty-state">No deals yet. Add your first one below.</div>
+        <div className="empty-state">
+          <p>No deals yet.</p>
+          <button type="button" className="primary" onClick={onAddNew}>
+            Add your first deal
+          </button>
+        </div>
       ) : (
         <div>
           {deals.map((deal) => {
@@ -46,9 +51,7 @@ export function DealList({
                 />
                 <span className="name">{deal.name}</span>
                 <span className="sub-class">{SUB_ASSET_CLASS_LABELS[deal.sub_asset_class]}</span>
-                <span style={{ width: 130, textAlign: "right", fontSize: 13 }}>
-                  {formatMoney(deal.purchase_price)}
-                </span>
+                <span className="deal-price">{formatMoney(deal.purchase_price)}</span>
                 <button type="button" className="link" onClick={() => onEdit(deal)}>
                   Edit
                 </button>
