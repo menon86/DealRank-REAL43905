@@ -165,6 +165,11 @@ class MetricsOut(BaseModel):
     equity_multiple: Decimal | None
     exit_value: Decimal
     net_sale_proceeds: Decimal
+    equity_invested: Decimal
+    total_distributions: Decimal
+    forward_noi: Decimal
+    selling_costs: Decimal
+    loan_balance_at_exit: Decimal
 
 
 class RankRequest(BaseModel):

@@ -79,6 +79,14 @@ export interface MetricsOut {
   equity_multiple: number | null;
   exit_value: number;
   net_sale_proceeds: number;
+  /** Purchase price + closing costs − loan amount. */
+  equity_invested: number;
+  /** Sum of every year's levered cash flow plus net sale proceeds. */
+  total_distributions: number;
+  /** NOI for year hold_period_years + 1, the basis of exit value. */
+  forward_noi: number;
+  selling_costs: number;
+  loan_balance_at_exit: number;
 }
 
 export interface RankedDealOut {

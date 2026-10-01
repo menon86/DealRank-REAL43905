@@ -90,11 +90,12 @@ def _add_comparison_slide(prs: Presentation, entries: list[RankedEntry]) -> None
         ("Levered IRR (reference)", lambda e: percent(e.metrics.levered_irr)),
         ("Going-in cap rate", lambda e: percent(e.metrics.going_in_cap_rate)),
         ("Year 1 DSCR", lambda e: number(e.metrics.year_one_dscr)),
+        ("Equity invested", lambda e: money(e.metrics.equity_invested)),
         ("Cash-on-cash", lambda e: percent(e.metrics.cash_on_cash)),
         ("Equity multiple", lambda e: multiple(e.metrics.equity_multiple)),
     ]
 
-    # 15 rows x 0.34" from 0.95" leaves room for a two-line header row
+    # 16 rows x 0.34" from 0.95" leaves room for a two-line header row
     # (long deal names at 5 columns) inside the 7.5" slide.
     rows = 1 + len(labels_and_values)
     cols = 1 + len(entries)

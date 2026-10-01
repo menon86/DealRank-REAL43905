@@ -72,6 +72,13 @@ export function RankingView({
         <ReportDownloads dealIds={selectedDealIds} hurdleRate={hurdleRate} />
       </div>
 
+      {selectedDealIds.length < 3 && (
+        <div className="status-banner info" role="status">
+          The v1 ranking covers 3–5 deals. Select {3 - selectedDealIds.length} more on the Deals
+          tab.
+        </div>
+      )}
+
       <section className="methodology-panel" aria-labelledby="ranking-methodology-title">
         <h3 id="ranking-methodology-title">How this ranking works</h3>
         <dl>

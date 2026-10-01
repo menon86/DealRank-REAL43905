@@ -336,6 +336,12 @@ table.data-table tbody tr.section-row td {
   color: var(--color-negative);
 }
 
+.status-banner.info {
+  background: #fff8e6;
+  border: 1px solid #f0dca8;
+  color: #6b4e00;
+}
+
 .status-banner.loading {
   background: var(--color-accent-bg);
   color: var(--color-text-muted);
@@ -460,7 +466,8 @@ table.comparison-table thead tr th {
 
 /* Waterfall: deductions indented with a "less" marker, subtotals ruled
    off above and bold, so GPR -> EGI -> NOI reads as arithmetic. */
-table.comparison-table .row-operator {
+table.comparison-table .row-operator,
+table.projection-table .row-operator {
   display: inline-block;
   width: 34px;
   font-size: 11px;
@@ -468,12 +475,15 @@ table.comparison-table .row-operator {
   font-style: italic;
 }
 
-table.comparison-table tr.row-deduction td {
+table.comparison-table tr.row-deduction td,
+table.projection-table tr.row-deduction td {
   color: var(--color-text-muted);
 }
 
 table.comparison-table tr.row-subtotal th,
-table.comparison-table tr.row-subtotal td {
+table.comparison-table tr.row-subtotal td,
+table.projection-table tr.row-subtotal th,
+table.projection-table tr.row-subtotal td {
   font-weight: 700;
   border-top: 1px solid var(--color-text);
 }
@@ -519,6 +529,111 @@ table.comparison-table tr.row-reference td {
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-weight: 600;
+}
+
+/* ---- Formula reference (comparison view) -------------------------------- */
+
+.formula-reference {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.formula-reference summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.formula-reference dl {
+  margin: 10px 0 0;
+  display: grid;
+  gap: 6px;
+}
+
+.formula-reference dl > div {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 12px;
+}
+
+.formula-reference dt {
+  font-weight: 600;
+}
+
+.formula-reference dd {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+/* ---- Year-by-year projection -------------------------------------------- */
+
+.projection {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.projection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.card .projection-header h3 {
+  margin: 0;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.segmented button {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: var(--color-accent-bg);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+table.projection-table {
+  font-variant-numeric: tabular-nums;
+  width: auto;
+  min-width: 100%;
+}
+
+table.projection-table thead th:first-child,
+table.projection-table tbody th {
+  position: sticky;
+  left: 0;
+  background: var(--color-surface);
+  z-index: 1;
+  min-width: 210px;
+}
+
+.projection-note {
+  margin-top: 10px;
+}
+
+@media (max-width: 640px) {
+  .formula-reference dl > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
 }
 
 /* ---- Ranking table ------------------------------------------------------ */

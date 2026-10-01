@@ -126,3 +126,11 @@ class DealMetrics:
     equity_multiple: Decimal | None = None
     exit_value: Decimal = Decimal("0")
     net_sale_proceeds: Decimal = Decimal("0")
+    # Inputs to the headline figures above, exposed so each formula can be
+    # traced on screen: equity behind cash-on-cash and the equity
+    # multiple, the multiple's numerator, and the exit arithmetic.
+    equity_invested: Decimal = Decimal("0")
+    total_distributions: Decimal = Decimal("0")
+    forward_noi: Decimal = Decimal("0")
+    selling_costs: Decimal = Decimal("0")
+    loan_balance_at_exit: Decimal = Decimal("0")

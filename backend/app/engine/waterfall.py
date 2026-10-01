@@ -21,6 +21,11 @@ class WaterfallResult:
     annual_cash_flows: list[AnnualCashFlow]
     exit_value: Decimal
     net_sale_proceeds: Decimal
+    # The pieces exit value and net sale proceeds are built from, kept so
+    # the comparison view can show the exit arithmetic line by line.
+    forward_noi: Decimal
+    selling_costs: Decimal
+    loan_balance_at_exit: Decimal
 
 
 def _noi_for_year(
@@ -80,4 +85,7 @@ def project(deal: DealInputs) -> WaterfallResult:
         annual_cash_flows=annual_cash_flows,
         exit_value=exit_value,
         net_sale_proceeds=net_sale_proceeds,
+        forward_noi=forward_noi,
+        selling_costs=selling_costs,
+        loan_balance_at_exit=ending_balance,
     )
