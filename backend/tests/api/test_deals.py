@@ -129,6 +129,21 @@ def test_metrics_matches_golden_fixture_through_the_api(client):
     assert Decimal(metrics["year_one_noi"]) == Decimal("1375000.0000")
     assert len(metrics["annual_cash_flows"]) == 7
     assert Decimal(metrics["annual_cash_flows"][0]["noi"]) == Decimal("1375000.0000")
+    # Equity invested and the exit breakdown travel with the headline
+    # metrics so the comparison view can show each formula's inputs.
+    for field in (
+        "equity_invested",
+        "total_distributions",
+        "forward_noi",
+        "selling_costs",
+        "loan_balance_at_exit",
+    ):
+        assert field in metrics, field
+    assert Decimal(metrics["equity_invested"]) == Decimal(
+        STUDENT_HOUSING_PAYLOAD["purchase_price"]
+    ) + Decimal(STUDENT_HOUSING_PAYLOAD["closing_costs"]) - Decimal(
+        STUDENT_HOUSING_PAYLOAD["loan_amount"]
+    )
 
 
 @pytest.mark.parametrize(

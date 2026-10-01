@@ -71,15 +71,16 @@ def compute(deal: DealInputs) -> DealMetrics:
     # no debt anywhere, terminal proceeds are exit value less selling
     # costs only (no loan payoff, since there is no loan in this stream).
     unlevered_outlay = deal.purchase_price + deal.closing_costs
-    unlevered_exit_proceeds = result.exit_value - (result.exit_value * deal.selling_costs_rate)
+    unlevered_exit_proceeds = result.exit_value - result.selling_costs
     unlevered_stream = [-unlevered_outlay] + [cf.unlevered_cash_flow for cf in flows]
     unlevered_stream[-1] += unlevered_exit_proceeds
     unlevered_irr = _irr(unlevered_stream)
 
+    # Total distributions to equity: every year's levered cash flow plus
+    # the net sale proceeds at exit.
     total_levered_cf = sum((cf.levered_cash_flow for cf in flows), Decimal("0"))
-    equity_multiple = (
-        (total_levered_cf + result.net_sale_proceeds) / equity if equity != 0 else None
-    )
+    total_distributions = total_levered_cf + result.net_sale_proceeds
+    equity_multiple = total_distributions / equity if equity != 0 else None
 
     return DealMetrics(
         annual_cash_flows=flows,
@@ -92,4 +93,9 @@ def compute(deal: DealInputs) -> DealMetrics:
         equity_multiple=equity_multiple,
         exit_value=result.exit_value,
         net_sale_proceeds=result.net_sale_proceeds,
+        equity_invested=equity,
+        total_distributions=total_distributions,
+        forward_noi=result.forward_noi,
+        selling_costs=result.selling_costs,
+        loan_balance_at_exit=result.loan_balance_at_exit,
     )

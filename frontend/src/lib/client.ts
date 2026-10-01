@@ -69,6 +69,11 @@ const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
   "equity_multiple",
   "exit_value",
   "net_sale_proceeds",
+  "equity_invested",
+  "total_distributions",
+  "forward_noi",
+  "selling_costs",
+  "loan_balance_at_exit",
 ];
 
 /** "0.0625" -> 0.0625; null passes through; numbers already-parsed pass through. */
