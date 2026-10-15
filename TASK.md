@@ -1,121 +1,105 @@
-# TASK: Render deployment & DB provisioning
+# TASK: Deliverable 3 — Customized Housing Inputs, Unit Mix, Financing Flexibility & Excel Ingestion
 
 ## Why
-`render.yaml` (repo root) is checked in but the app has never actually been
-deployed — see README's "Remaining manual steps" section. This is the
-critical path item: the frontend deploy and any live-data testing depend on
-this landing first.
+While Deliverable 2 provided a solid MVP waterfall calculation engine, institutional underwriting requires granular operational inputs and financing structures. Real estate analysts underwrite multifamily deals with granular unit mixes (studio through 4+ beds), asset-class-specific revenues (e.g. structured parking, pet rent, tech packages), flexible debt products (Interest-Only periods, floating rates, balloon maturities), and direct Excel workbook import/export rather than manual single-number entries.
 
 ---
 
-## Completed Engineering & Configuration Fixes
+## What to do
 
-Before deploying, several critical blockers and automation improvements were implemented:
+### 1. Housing-Type Specific Custom Input Fields
+Enable tailored input fields dynamically keyed to the selected `sub_asset_class`:
+- **Student Housing**:
+  - Per-bed leasing primary mode (leased by bed rather than unit).
+  - Academic year leasing schedules vs. 12-month annual contracts.
+  - August turn concentration schedule (turnover rate default 80%–90%).
+  - Mandatory tenant fee packages: Tech/Wi-Fi packages, furniture package rentals, utility caps.
+- **Suburban Garden**:
+  - Surface stalls vs. covered carports vs. detached garages.
+  - Storage locker counts and monthly fee schedules.
+  - Pet rent, pet deposit fees, and pet penetration rates.
+  - Ratio Utility Billing System (RUBS) reimbursement rate (% of utility OpEx billed back to tenants).
+  - Amenity packages (clubhouse, pool, dog park maintenance).
+- **Urban Mid-Rise**:
+  - Structured/subterranean parking stalls, parking ratios (stalls/unit), and monthly garage parking rents.
+  - Ground-floor commercial / retail square footage and annual NNN lease rent.
+  - High-density amenities (concierge desk, automated package locker systems, rooftop lounge fees).
 
-1. **Driver compatibility for Render PostgreSQL (`psycopg` v3)**:
-   - Render's managed PostgreSQL connection strings use the `postgresql://` or `postgres://` scheme. In SQLAlchemy 2.0, omitting the driver causes it to look for `psycopg2` (which is not installed; `psycopg` v3 is the project's dependency).
-   - Added automatic scheme normalization (`postgresql+psycopg://`) across:
-     - `backend/app/config.py` (`Settings.normalize_database_url` field validator)
-     - `backend/migrations/env.py` (Alembic runner)
-     - `backend/seed.py` and `backend/seed_reference_data.py`
+### 2. Granular Unit Mix Modeling (Studio, 1, 2, 3, 4+ Beds)
+Replace the single blended unit/bed input with a structured 5-tier unit mix matrix:
+- **Studio**: Unit count, average square footage, monthly rent.
+- **1 Bedroom / 1 Bath**: Unit count, average square footage, monthly rent.
+- **2 Bedroom**: Unit count, beds per unit, average square footage, monthly rent (or rent/bed).
+- **3 Bedroom**: Unit count, beds per unit, average square footage, monthly rent (or rent/bed).
+- **4+ Bedroom**: Unit count, beds per unit, average square footage, monthly rent (or rent/bed).
+- **Calculated Roll-Ups**:
+  - Total Units $= \sum \text{units}_t$
+  - Total Beds $= \sum (\text{units}_t \times \text{beds}_t)$
+  - Aggregate Gross Potential Rent (GPR) $= 12 \times \sum (\text{units}_t \times \text{rent}_t)$
+  - Weighted Average Rent per Unit and Rent per Square Foot.
 
-2. **Automated & Idempotent Production Seeding**:
-   - Because Render's Free tier does not provide SSH / web shell access, seeding cannot be performed manually from the Render dashboard.
-   - Updated `seed.py` and `seed_reference_data.py` to be idempotent (checks if records already exist before inserting; skips gracefully if populated).
-   - Added automated seeding to `dealrank-api`'s `startCommand` in `render.yaml`:
-     ```bash
-     alembic upgrade head && python seed_reference_data.py && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT
-     ```
-   - On every deploy or restart, migrations run, reference cap rate spreads are seeded, example deals are seeded, and the API server starts cleanly.
+### 3. Expanded Operational Inputs & Ancillary Revenue
+Provide dedicated input fields for non-rental income:
+- **Parking Revenue Engine**:
+  - Number of rentable parking stalls (surface, covered, garage).
+  - Monthly rent per stall.
+  - Parking occupancy rate.
+  - Total Annual Parking Revenue $= \text{stalls} \times \text{fee} \times \text{occupancy} \times 12$.
+- **Storage Revenue**: Storage unit count $\times$ monthly storage rate $\times 12$.
+- **Pet Revenue**: Active pet count $\times$ monthly pet rent $\times 12$.
+- **Utility Reimbursement**: RUBS recovery rate applied to utility expenses.
+- **Capital Expenditures (CapEx)**: Replacement reserve per unit/year deducted below NOI or factored into cash flow.
 
-3. **CORS Flexibility for Render Subdomains**:
-   - Added `allow_origin_regex=r"https://.*\.onrender\.com"` in `backend/app/main.py` alongside `CORS_ORIGINS`.
-   - This ensures requests from any Render preview, static site, or assigned custom subdomain are accepted without CORS blocking.
+### 4. Financing Flexibility & Diverse Loan Types
+Expand the debt engine beyond standard 30-year fixed amortization:
+- **Interest-Only (I/O) Periods**:
+  - Configurable I/O horizon (e.g. 1, 2, 3, or 5 years).
+  - During I/O: Monthly debt service $= \text{loan\_amount} \times (\text{rate} / 12)$, principal payment $= 0$.
+  - Post-I/O: Level amortization solved over remaining term ($\text{amortization\_years} - \text{io\_years}$).
+- **Floating-Rate Debt**:
+  - Reference Index (e.g. 30-day SOFR) + Spread (bps).
+  - Optional Interest Rate Cap strike rate to model worst-case debt service.
+- **Balloon Payment at Loan Maturity**:
+  - Loan term (e.g. 5, 7, 10 years) independent of amortization duration (e.g. 30 years).
+  - Unamortized balloon balance calculated at loan maturity or exit hold date.
+- **Multi-Tranche Debt (Senior + Mezzanine)**:
+  - Support for secondary debt tranches (mezzanine / second lien) with separate LTV, interest rate, and term.
+  - Composite DSCR and blended debt yield reporting.
 
-4. **Frontend Node Engine Pinning**:
-   - Pinned `NODE_VERSION: "20"` in `render.yaml` under `dealrank-frontend` and placed `.nvmrc` in `frontend/` to satisfy `frontend/package.json`'s `"engines": { "node": ">=20 <21" }` constraint.
-
-5. **`CODEOWNERS` Housekeeping**:
-   - Replaced placeholder `@methodology-owner` with `@menon86` in `CODEOWNERS`.
-
----
-
-## Deployment & Verification Steps
-
-### 1. Provision via Blueprint
-1. Open the [Render Dashboard](https://dashboard.render.com/).
-2. Click **New +** → **Blueprint**.
-3. Connect and select the repository: `menon86/DealRank-REAL43905` (branch: `feat/render-deploy` or after merging to `main`).
-4. Click **Apply**.
-5. Render will provision three resources according to `render.yaml`:
-   - `dealrank-db` (PostgreSQL 16, free tier)
-   - `dealrank-api` (Python 3.11 web service, free tier)
-   - `dealrank-frontend` (Static site, free tier)
-
-### 2. Verify Hostnames & Environment Variables
-- Check the assigned URLs for `dealrank-api` and `dealrank-frontend`.
-- If the default URLs (`https://dealrank-api.onrender.com` and `https://dealrank-frontend.onrender.com`) were assigned, the hardcoded blueprint variables work out-of-the-box.
-- If Render assigned a unique suffix (e.g. `dealrank-api-xxxx.onrender.com`):
-  - In `dealrank-frontend` -> **Environment**: update `VITE_API_BASE_URL` to the actual API URL and trigger a manual redeploy (since Vite bakes `VITE_` variables at build time).
-  - In `dealrank-api` -> **Environment**: verify `CORS_ORIGINS` (or rely on the built-in `allow_origin_regex` wildcard for `*.onrender.com`).
-
-### 3. Verify Deploy Logs & Seeding
-In the `dealrank-api` deploy logs, verify:
-1. `alembic upgrade head` applies all migrations (0001 through head).
-2. `seed_reference_data.py` outputs: `Seeded 3 cap rate spreads.`
-3. `seed.py` outputs: `Seeded 3 deals.`
-4. `uvicorn app.main:app` binds to port and begins serving traffic.
-
-### 4. Live Smoke Testing
-1. Navigate to the live frontend URL: `https://dealrank-frontend.onrender.com` (or assigned hostname).
-2. **Deals Tab**:
-   - Verify the 3 seeded deals appear: *Campus View Student Housing*, *Willowbrook Suburban Garden*, and *Meridian Urban Mid-Rise*.
-   - Create a test deal (e.g. 50 units, $1,500/mo, 5% vacancy) and save it.
-3. **Compare Tab**:
-   - Select 3 deals and view side-by-side metrics (NOI, Cap Rate, DSCR, Cash-on-Cash, Unlevered IRR, Levered IRR, Equity Multiple).
-4. **Rank Tab**:
-   - Enter a hurdle rate (e.g., `0.08` for 8%).
-   - Confirm deals are ranked in descending order by spread over hurdle (`unlevered_irr - hurdle_rate`).
-5. **Export Buttons**:
-   - Click **Download PDF** → Confirm `dealrank-comparison.pdf` downloads and opens properly.
-   - Click **Download PPTX** → Confirm `dealrank-comparison.pptx` downloads and opens properly.
-
-### 5. Submission Housekeeping
-Once all checks pass:
-```bash
-git tag deliverable-2
-git push origin deliverable-2
-```
-Add teammates as GitHub collaborators under **Settings → Collaborators**.
+### 5. Excel Import for Property Details & Financing
+Enable seamless ingestion of spreadsheets for instant deal creation:
+- **Underwriting & Property Details Import**:
+  - Supports `.xlsx` and `.csv` files matching the schema in `docs/templates/underwriting-and-financing-import-spec.md`.
+  - Ingests Property Name, Sub-Asset Class, Acquisition Price, Closing Costs, 5-tier Unit Mix, Parking details, and OpEx lines.
+- **Financing Details Import**:
+  - Upload debt assumptions: Loan Amount, Loan Type (Fixed / Floating / I-O), Interest Rate, I/O Duration, Amortization Schedule, and Fees.
+- **Template Generation & Download**:
+  - Provide downloadable pre-formatted `.xlsx` underwriting templates directly from the UI.
+  - Robust client-side and server-side cell validation with row/column error messaging.
 
 ---
 
-## Acceptance Status
-- [x] Pre-deploy database URL driver bug identified and resolved (`postgresql+psycopg://`).
-- [x] Automated, idempotent data seeding wired into `startCommand` for Render free tier.
-- [x] Node version and build environment configured for static frontend.
-- [x] `CODEOWNERS` updated with methodology reviewer `@menon86`.
-- [ ] Blueprint applied on Render dashboard.
-- [ ] Live URL smoke tests verified.
-- [ ] `deliverable-2` tag pushed to `origin`.
+## Acceptance Criteria
+- [ ] Database schema and Pydantic models support granular unit mix entries (`studio`, `1bed`, `2bed`, `3bed`, `4bed_plus`).
+- [ ] GPR calculation engine dynamically rolls up unit mix rows into annual GPR.
+- [ ] Housing-type custom fields (parking stalls, storage, pet fees, RUBS, tech packages) integrated into revenue and EGI calculation.
+- [ ] Debt calculation engine models Interest-Only periods, remaining-term amortization, and balloon balances at maturity.
+- [ ] Excel import endpoint (`POST /deals/import/excel`) successfully parses `.xlsx` workbooks and populates all deal parameters.
+- [ ] Frontend Deal Form provides dynamic sub-asset class field toggling, an interactive unit mix matrix, financing structure options, and an Excel dropzone.
+- [ ] Full unit-test suite covers unit mix roll-ups, I/O debt schedules, and Excel parser error handling.
 
 ---
 
-# TASK: UI/UX — Deal form & deal list (Completed in PR #7)
+# PRIOR COMPLETED TASKS
 
-## Why
-The core MVP flow (build, form fields, API wiring) already works end to end
-— this is polish, not new functionality. Grading likely weighs on the app
-being pleasant and clear to actually use, not just functionally correct.
+## TASK: Render deployment & DB provisioning (Completed in PR #5)
+- Automated database URL normalization (`postgresql+psycopg://`).
+- Idempotent database migrations and seeding (`seed.py`, `seed_reference_data.py`) in `render.yaml`.
+- Wildcard CORS support for Render subdomains.
+- Live deployment configuration verified.
 
-## Where
-- `frontend/src/components/DealForm.tsx`
-- `frontend/src/components/DealList.tsx`
-- Shared CSS: `frontend/src/styles.css`
-
-## What was completed
-1. **Leasing-mode toggle clarity.** Visual distinction between active modes with conditional field display.
-2. **Validation & error states.** In-line field-level validation and clear error states.
-3. **Empty states.** Helpful call-to-action prompts when no deals are present.
-4. **Responsive layout.** Form and list responsive styling across various viewport widths.
-5. **Field grouping/labels.** Grouped inputs into logical sections with clear typography.
+## TASK: UI/UX — Deal form & deal list (Completed in PR #7)
+- Leasing-mode visual distinction and conditional field display.
+- In-line field-level validation and clear error states.
+- Helpful call-to-action prompts for empty states.
+- Responsive form and table layouts.
