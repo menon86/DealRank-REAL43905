@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ComparisonTable } from "./components/ComparisonTable";
 import { DealForm } from "./components/DealForm";
 import { DealList } from "./components/DealList";
+import { MarketCheckView } from "./components/MarketCheckView";
 import { RankingView } from "./components/RankingView";
+import { RiskRankingView } from "./components/RiskRankingView";
+import { SensitivityView } from "./components/SensitivityView";
 import { Shell } from "./components/Shell";
 import type { Tab } from "./components/Shell";
 import * as client from "./lib/client";
@@ -206,6 +209,10 @@ export function App() {
           onRetry={() => setRankReloadKey((key) => key + 1)}
         />
       )}
+
+      {activeTab === "risk" && <RiskRankingView selectedDealIds={selectedIds} />}
+      {activeTab === "sensitivity" && <SensitivityView deals={deals} />}
+      {activeTab === "market" && <MarketCheckView deals={deals} />}
     </Shell>
   );
 }

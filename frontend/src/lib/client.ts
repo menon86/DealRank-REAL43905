@@ -19,8 +19,24 @@ import type {
   DealCreate,
   DealOut,
   DealUpdate,
+  Distribution,
+  ExcludedDealOut,
+  GeographyOut,
+  HurdleOut,
+  HurdleTableOut,
   MetricsOut,
+  MonteCarloRequest,
+  MonteCarloResponse,
   RankedDealOut,
+  RentCheckOut,
+  RiskRankRequest,
+  RiskRankResponse,
+  RiskRankedDealOut,
+  SweepPoint,
+  SweepResponse,
+  SweepVariable,
+  TreasuryOut,
+  Weights,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -117,6 +133,47 @@ function parseRankedDealOut(raw: RankedDealOut): RankedDealOut {
   };
 }
 
+/** Parses the named decimal-string fields of a flat response object. */
+function numify<T extends object>(raw: T, fields: string[]): T {
+  const parsed = { ...raw } as Record<string, unknown>;
+  for (const field of fields) parsed[field] = toNumber((raw as Record<string, unknown>)[field]);
+  return parsed as T;
+}
+
+function parseTreasury(raw: TreasuryOut): TreasuryOut {
+  return numify(raw, ["yield"]);
+}
+
+function parseHurdle(raw: HurdleOut): HurdleOut {
+  return numify(raw, ["treasury_yield", "cap_rate", "noi_growth", "total"]);
+}
+
+function parseWeights(raw: Weights): Weights {
+  return numify(raw, ["irr", "cash_flow", "risk"]);
+}
+
+function parseRiskRanked(raw: RiskRankedDealOut): RiskRankedDealOut {
+  return {
+    ...raw,
+    deal: parseDealOut(raw.deal),
+    metrics: parseMetricsOut(raw.metrics),
+    hurdle: parseHurdle(raw.hurdle),
+    spread: toNumber(raw.spread) ?? 0,
+    ltv: toNumber(raw.ltv) ?? 0,
+    factors: parseWeights(raw.factors),
+    score: toNumber(raw.score) ?? 0,
+  };
+}
+
+function parseExcluded(raw: ExcludedDealOut): ExcludedDealOut {
+  return {
+    ...raw,
+    deal: parseDealOut(raw.deal),
+    metrics: parseMetricsOut(raw.metrics),
+    hurdle: parseHurdle(raw.hurdle),
+  };
+}
+
 export class ApiError extends Error {
   constructor(
     method: string,
@@ -189,6 +246,94 @@ export async function rank(dealIds: string[], hurdleRate: number): Promise<Ranke
     body: JSON.stringify({ deal_ids: dealIds, hurdle_rate: hurdleRate }),
   });
   return raw.map(parseRankedDealOut);
+}
+
+export async function getHurdles(): Promise<HurdleTableOut> {
+  const raw = await request<HurdleTableOut>("/reference/hurdles");
+  return { treasury: parseTreasury(raw.treasury), hurdles: raw.hurdles.map(parseHurdle) };
+}
+
+export async function rankRiskAdjusted(input: RiskRankRequest): Promise<RiskRankResponse> {
+  const raw = await request<RiskRankResponse>("/rank/risk-adjusted", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return {
+    ...raw,
+    treasury: parseTreasury(raw.treasury),
+    dscr_minimum: toNumber(raw.dscr_minimum) ?? 0,
+    weights: parseWeights(raw.weights),
+    ranked: raw.ranked.map(parseRiskRanked),
+    excluded: raw.excluded.map(parseExcluded),
+  };
+}
+
+const SWEEP_POINT_FIELDS = [
+  "value",
+  "unlevered_irr",
+  "levered_irr",
+  "cash_on_cash",
+  "equity_multiple",
+  "min_dscr",
+  "exit_value",
+];
+
+export async function sweep(
+  dealId: string,
+  variable: SweepVariable,
+  steps = 13,
+): Promise<SweepResponse> {
+  const raw = await request<SweepResponse>(`/deals/${dealId}/sensitivity`, {
+    method: "POST",
+    body: JSON.stringify({ variable, steps }),
+  });
+  return {
+    ...raw,
+    base_value: toNumber(raw.base_value) ?? 0,
+    points: raw.points.map((p) => numify<SweepPoint>(p, SWEEP_POINT_FIELDS)),
+  };
+}
+
+const DISTRIBUTION_FIELDS = ["mean", "stdev", "p5", "p25", "p50", "p75", "p95"];
+
+function parseDistribution(raw: Distribution | null): Distribution | null {
+  return raw ? numify(raw, DISTRIBUTION_FIELDS) : null;
+}
+
+export async function monteCarlo(
+  dealId: string,
+  input: MonteCarloRequest,
+): Promise<MonteCarloResponse> {
+  const raw = await request<MonteCarloResponse>(`/deals/${dealId}/monte-carlo`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return {
+    ...raw,
+    hurdle: toNumber(raw.hurdle),
+    unlevered_irr: parseDistribution(raw.unlevered_irr),
+    levered_irr: parseDistribution(raw.levered_irr),
+    unlevered_histogram: raw.unlevered_histogram.map((b) => numify(b, ["low", "high"])),
+    prob_below_hurdle: toNumber(raw.prob_below_hurdle),
+    prob_dscr_below_minimum: toNumber(raw.prob_dscr_below_minimum),
+  };
+}
+
+export function listGeographies(): Promise<GeographyOut[]> {
+  return request<GeographyOut[]>("/market-rents/geographies");
+}
+
+export async function rentCheck(dealId: string, geography: string): Promise<RentCheckOut> {
+  const raw = await request<RentCheckOut>(
+    `/deals/${dealId}/rent-check?geography=${encodeURIComponent(geography)}`,
+  );
+  return numify(raw, [
+    "deal_rent",
+    "market_rent",
+    "variance",
+    "market_yoy_growth",
+    "deal_rent_growth",
+  ]);
 }
 
 /**
