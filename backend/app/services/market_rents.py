@@ -62,11 +62,27 @@ def parse_wide_rent_csv(text: str, months: int = 24) -> list[RentRow]:
         raise ValueError("no monthly date columns found (expected e.g. 2025-06-30 or 2025_06)")
     keep = set(sorted(set(periods.values()))[-months:])
 
+    records = list(reader)
+    if "bed_size" in reader.fieldnames:
+        # Apartment List repeats every geography per bed size; keep the
+        # all-unit series so rents stay whole-unit and one row per month.
+        records = [r for r in records if (r.get("bed_size") or "").strip() == "overall"]
+    # Apartment List also lists a city and its metro under the same name
+    # (e.g. "Pittsburgh, PA"); suffix those with the location type.
+    types_by_name: dict[str, set[str]] = {}
+    if "location_type" in reader.fieldnames:
+        for r in records:
+            types_by_name.setdefault((r.get(name_col) or "").strip(), set()).add(
+                (r.get("location_type") or "").strip()
+            )
+
     rows: list[RentRow] = []
-    for record in reader:
+    for record in records:
         geography = (record.get(name_col) or "").strip()
         if not geography:
             continue
+        if len(types_by_name.get(geography, ())) > 1:
+            geography = f"{geography} ({record['location_type'].strip()})"
         for column, period in periods.items():
             if period not in keep:
                 continue

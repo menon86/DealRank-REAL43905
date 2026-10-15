@@ -36,6 +36,32 @@ def test_parse_apartment_list_underscore_dates():
     ]
 
 
+# Trimmed from the real Apartment_List_Rent_Estimates_2026_09.csv: one row per
+# geography per bed size, and "Pittsburgh, PA" names both a metro and a city.
+APARTMENT_LIST_REAL = (
+    "location_name,location_type,location_fips_code,population,state,county,metro,"
+    "bed_size,2026_07,2026_08,2026_09\n"
+    '"Pittsburgh, PA",Metro,38300,2365501,,,"Pittsburgh, PA",overall,1271,1265,1256\n'
+    '"Pittsburgh, PA",Metro,38300,2365501,,,"Pittsburgh, PA",1br,1058,1053,1046\n'
+    '"Pittsburgh, PA",City,4261000,303843,Pennsylvania,Allegheny County,"Pittsburgh, PA",'
+    "overall,1451,1440,1420\n"
+    '"Pittsburgh, PA",City,4261000,303843,Pennsylvania,Allegheny County,"Pittsburgh, PA",'
+    "1br,1265,1255,1238\n"
+    "Texas,State,48,29243342,Texas,,,overall,1229,1230,1229\n"
+)
+
+
+def test_parse_apartment_list_real_format_keeps_overall_and_disambiguates_names():
+    rows = parse_wide_rent_csv(APARTMENT_LIST_REAL)
+    assert len(rows) == 9  # 3 geographies x 3 months, no 1br rows
+    latest = {r.geography: r.median_rent for r in rows if r.period == date(2026, 9, 1)}
+    assert latest == {
+        "Pittsburgh, PA (Metro)": D("1256.00"),
+        "Pittsburgh, PA (City)": D("1420.00"),
+        "Texas": D("1229.00"),
+    }
+
+
 @pytest.mark.parametrize(
     "text, message",
     [
