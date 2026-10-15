@@ -122,9 +122,101 @@ Unlevered IRR, never Levered IRR** — levered IRR is shown for reference, becau
 would let a deal win by taking on more leverage rather than by being a better asset. A deal whose
 unlevered IRR doesn't converge sorts last rather than disappearing from the list.
 
-**Deliverable 3, not yet built**, replaces the flat hurdle with a risk-adjusted,
+**Deliverable 3 (Underwriting Flexibility & Risk Framework)** replaces the flat hurdle with a risk-adjusted,
 sub-class-specific one (`10-Year Treasury + cap-rate spread + assumed stabilized NOI growth`) and
 adds a DSCR gate that excludes deals below a configured minimum from ranking entirely, rather than
-blending DSCR into the score. See the docstring in `backend/app/engine/ranking.py` — that module
-is currently just a placeholder describing this future work; none of it exists yet, and nothing in
-Deliverable 2's engine or API assumes it will look exactly like this description.
+blending DSCR into the score. See the docstring in `backend/app/engine/ranking.py`.
+
+---
+
+## Deliverable 3 Advanced Underwriting Extensions
+
+### 1. Granular Unit Mix Modeling
+
+In institutional underwriting, properties are rarely modeled as a single aggregate unit count or bed count. Deliverable 3 supports a granular unit mix breakdown across 5 standardized unit types:
+- **Studio**
+- **1 Bedroom (1BR)**
+- **2 Bedroom (2BR)**
+- **3 Bedroom (3BR)**
+- **4+ Bedroom (4BR+)**
+
+For each unit type $t$, the analyst can specify:
+- $\text{units}_t$: Number of units of type $t$
+- $\text{beds\_per\_unit}_t$: Number of beds per unit (critical for Student Housing)
+- $\text{avg\_sqft}_t$: Average square footage per unit
+- $\text{monthly\_rent}_t$: Market/underwritten monthly rent per unit (or per bed in per-bed leasing mode)
+
+#### Aggregate Revenue Formulation
+$$\text{Total Units} = \sum_{t} \text{units}_t, \quad \text{Total Beds} = \sum_{t} (\text{units}_t \times \text{beds\_per\_unit}_t)$$
+
+Gross Potential Rent (GPR) is computed directly from the unit mix:
+$$\text{GPR}_{\text{per-unit}} = 12 \times \sum_{t} (\text{units}_t \times \text{monthly\_rent}_t)$$
+$$\text{GPR}_{\text{per-bed}} = 12 \times \sum_{t} (\text{units}_t \times \text{beds\_per\_unit}_t \times \text{monthly\_rent\_per\_bed}_t)$$
+
+The weighted average rent per unit, weighted average rent per bed, and weighted average rent per square foot are derived automatically for benchmarking against market comp tables.
+
+---
+
+### 2. Housing-Type Specific Custom Inputs & Ancillary Revenue
+
+Different multifamily asset sub-classes feature fundamentally distinct revenue and operational expense drivers:
+
+#### A. Suburban Garden
+- **Parking**: Surface parking stalls vs. detached garages vs. carports.
+  $$\text{Parking Revenue} = 12 \times \sum (\text{stalls}_k \times \text{monthly\_rate}_k \times \text{occupancy}_k)$$
+- **Storage**: Storage locker/unit counts and monthly fees.
+- **Pet Revenue**: Monthly pet rent plus non-refundable pet fees amortized over average tenancy.
+- **Utility Reimbursement (RUBS)**: Ratio Utility Billing System recovery percentage applied against water, sewer, and trash OpEx.
+
+#### B. Student Housing
+- **Per-Bed Leasing & Parental Guarantees**: Higher bad-debt recovery and individualized student leases.
+- **Lease Expiration Concentration**: August turnover surge modeling (turnover rate routinely 75%–90%).
+- **Mandatory Fee Packages**: Technology package fee (high-speed Wi-Fi), furniture package fees, and utility caps.
+- **Summer Operations**: Summer term occupancy / short-term sublease bridge adjustments.
+
+#### C. Urban Mid-Rise
+- **Structured Parking**: Subterranean or structured garage parking stalls, higher monthly rates per stall, and parking ratio constraints (stalls / unit).
+- **Ground-Floor Commercial / Retail**: Commercial square footage leased on NNN terms, providing non-residential ancillary income.
+- **High-Density Amenities**: Dedicated concierge, package locker systems, and rooftop amenity premium fees.
+
+#### Other Income Aggregation
+$$\text{Other Income Annual} = \text{Parking Income} + \text{Storage Income} + \text{Pet Fees} + \text{Tech/Utility Fees} + \text{Commercial NNN} + \text{Miscellaneous}$$
+
+---
+
+### 3. Flexible Financing Structures & Loan Types
+
+Deliverable 2 modeled a single fixed-rate amortizing loan with level monthly payments. Deliverable 3 introduces institutional financing flexibility:
+
+#### A. Interest-Only (I/O) Periods
+Borrowers frequently negotiate 1 to 5 years of interest-only payments before principal amortization begins:
+- **During I/O Period ($m \le 12 \times \text{io\_years}$)**:
+  $$\text{Monthly Payment} = \text{loan\_amount} \times \left(\frac{\text{interest\_rate}}{12}\right)$$
+  $$\text{Principal Paid} = 0$$
+- **Post-I/O Amortization Period ($m > 12 \times \text{io\_years}$)**:
+  The loan amortizes over the *remaining* term ($\text{amortization\_years} - \text{io\_years}$):
+  $$\text{Monthly Payment} = \text{loan\_amount} \times \frac{r(1+r)^{12 \times (\text{amort\_years} - \text{io\_years})}}{(1+r)^{12 \times (\text{amort\_years} - \text{io\_years})} - 1}$$
+  where $r = \frac{\text{interest\_rate}}{12}$.
+
+#### B. Floating-Rate Financing
+- Modeled as **Reference Index (SOFR) + Margin / Spread**.
+- Supports user-defined interest rate caps and index forward curves.
+
+#### C. Balloon Payments at Loan Maturity
+- Loan term (e.g., 5 or 7 years) may be shorter than the 30-year amortization schedule.
+- At loan maturity or hold exit (whichever occurs first), the outstanding principal balance is paid in full as a balloon payment, properly factored into terminal net sale proceeds or refinancing cash flow.
+
+#### D. Multi-Tranche Debt (Senior + Mezzanine)
+- Blended Cost of Capital and composite DSCR calculation:
+  $$\text{Composite DSCR} = \frac{\text{NOI}}{\text{Senior Debt Service} + \text{Mezzanine Debt Service}}$$
+
+---
+
+### 4. Excel Import / Upload Integration
+
+To eliminate repetitive manual data entry, analysts can ingest property underwriting details and debt terms directly from standard Excel workbooks (`.xlsx`, `.xls`) or CSV files:
+
+- **Property Details & Unit Mix Workbook**: Automatically maps columns for property identification, sub-asset class selection, 5-tier unit mix matrix, operating expenses, and turnover assumptions.
+- **Financing Workbook**: Automatically ingests debt structure, LTV, loan amount, interest rate, I/O period, amortization duration, and loan fees.
+- **Validation Engine**: Performs schema validation, verifies leasing-mode consistency, checks for positive unit counts and non-negative rents, and returns cell-level validation errors before database persistence.
+
