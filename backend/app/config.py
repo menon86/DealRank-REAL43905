@@ -4,6 +4,7 @@ The keys in backend/.env.example are the contract — don't rename them
 here without updating that file too.
 """
 
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import field_validator
@@ -29,6 +30,10 @@ class Settings(BaseSettings):
     APP_NAME: str = "DealRank"
     LOG_LEVEL: str = "info"
     CORS_ORIGINS: str = "http://localhost:5173"
+    # Used when the live FRED lookup fails; the API labels any hurdle built
+    # on it as "fallback" so it is never mistaken for a live quote.
+    TREASURY_10Y_FALLBACK: Decimal = Decimal("0.046")
+    FRED_SERIES_URL: str = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
 
     @field_validator("DATABASE_URL")
     @classmethod

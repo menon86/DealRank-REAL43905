@@ -52,6 +52,16 @@ mid-rise; manual entry of 3-5 deals; NOI/cap rate/DSCR/cash-on-cash/levered & un
 IRR/equity multiple; side-by-side comparison dashboard; ranking against user-defined hurdle;
 PDF/PPTX report export; deployed on Render.
 
+**Deliverable 3 (built):** per-sub-class risk-adjusted hurdle (10-Year Treasury from FRED + survey
+cap-rate spread + stabilized NOI growth), DSCR gate (excluded, not penalized), preference-weighted
+ranking (questionnaire or direct weights over return / cash flow / safety), rent sanity check
+against Zillow ZORI / Apartment List CSVs, single-variable sensitivity sliders (exit cap rate, rent
+growth), and Monte Carlo over exit cap, rent growth and vacancy. Endpoints: `GET /reference/hurdles`,
+`POST /rank/risk-adjusted`, `POST /deals/{id}/sensitivity`, `POST /deals/{id}/monte-carlo`,
+`GET /deals/{id}/rent-check`, `GET /market-rents/geographies`. Load market rents with
+`python ingest_market_rents.py zillow_zori <csv>` (Zillow's rent metrics are CSV downloads, not an
+API). **Not yet written:** the data provenance memo documenting the spread source and methodology.
+
 **In scope (Deliverable 3 Roadmap):**
 - **Asset-Class-Customized Inputs**: Housing-type specific operational drivers:
   - *Student Housing*: per-bed leasing, academic lease terms, August turn schedule, utility/tech packages, furniture fees.
