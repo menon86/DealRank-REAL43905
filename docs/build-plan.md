@@ -316,3 +316,90 @@ Disagree now; changing it after Phase 2 means re-deriving every fixture.
 
 **Scope creep from Deliverable 3.** Treasury lookups, DSCR gates, sensitivity sliders, and rent sanity
 checks are all out. `ranking.py` stays a docstring.
+
+---
+
+# Build plan — Deliverable 3: Advanced Underwriting, Financing & Ingestion
+
+Scope: Everything between the Deliverable 2 MVP baseline and an institutional-grade underwriting tool supporting housing-type customizations, granular unit mix, financing flexibility, and Excel data ingestion.
+
+---
+
+## Phase 8 — Data Architecture & Engine Extension (Unit Mix & Custom Inputs)
+
+### 8.1 Granular Unit Mix Model
+Create `DealUnitMix` model associated with `Deal` (or structured JSONB/relational table):
+- `unit_type`: Enum (`studio`, `1bed`, `2bed`, `3bed`, `4bed_plus`)
+- `unit_count`: integer $> 0$
+- `bed_count`: integer $\ge 0$ (default 1 for 1bed, 2 for 2bed, etc.)
+- `avg_sqft`: integer / decimal
+- `monthly_rent`: decimal (per unit or per bed)
+- Engine converter in `backend/app/engine/revenue.py` calculates GPR from unit mix if populated, with seamless fallback to legacy aggregate fields.
+
+### 8.2 Housing-Type Custom Inputs
+Extend `Deal` model with asset-class-specific attributes:
+- **Suburban Garden**: `parking_stalls_surface`, `parking_stalls_covered`, `parking_monthly_fee`, `storage_units`, `storage_monthly_fee`, `pet_monthly_fee`, `rubs_recovery_pct`.
+- **Student Housing**: `tech_package_fee_monthly_per_bed`, `furniture_fee_monthly_per_bed`, `summer_occupancy_factor`.
+- **Urban Mid-Rise**: `garage_parking_stalls`, `garage_monthly_rate`, `commercial_retail_sqft`, `commercial_rent_per_sqft_annual`.
+
+### 8.3 Revenue & Turnover Integration
+- `revenue.py`: Aggregate `other_income_annual` from parking, storage, pet fees, tech packages, and commercial income.
+- `expenses.py`: Student housing turnover timing and unit/bed turnover calculations refined against granular bedroom counts.
+
+---
+
+## Phase 9 — Advanced Financing Engine (Loan Types & Debt Flexibility)
+
+### 9.1 Interest-Only (I/O) Periods
+- Extend financing inputs with `io_period_years: int = 0`.
+- During years $1 \dots \text{io\_period\_years}$, monthly debt service is strictly $\text{loan\_amount} \times (\text{interest\_rate} / 12)$, principal amortization is \$0.
+- In subsequent years, amortization amortizes over $\text{amortization\_years} - \text{io\_period\_years}$.
+
+### 9.2 Floating Rate & Multi-Tranche Structures
+- `loan_type`: `fixed`, `floating`, `mezzanine`.
+- Floating debt: `sofr_index_rate` + `spread_bps` with optional `interest_rate_cap`.
+- Mezzanine / Second Lien tranche: secondary loan amount, interest rate, and separate amortization.
+- Composite DSCR reporting: Senior DSCR and Total Debt DSCR.
+
+### 9.3 Balloon Payment Modeling
+- Loan term (e.g. 5, 7, 10 years) distinct from 30-year amortization schedule.
+- Outstanding unamortized balance at loan maturity or exit hold horizon treated as terminal payoff.
+
+---
+
+## Phase 10 — Excel Ingestion Pipeline (`openpyxl`)
+
+### 10.1 Dependencies & Parser Architecture
+- Add `openpyxl>=3.1,<4.0` to `backend/pyproject.toml`.
+- Standalone ingestion module in `backend/app/ingestion/`:
+  - `excel_property.py`: Ingests property identity, sub-asset class, 5-tier unit mix matrix, and OpEx assumptions.
+  - `excel_financing.py`: Ingests loan tranches, interest rates, I/O periods, and amortization structures.
+  - `validator.py`: Comprehensive pre-import validation reporting sheet name, row number, column name, and invalid value.
+
+### 10.2 Import Endpoints
+- `POST /deals/import/excel`: Ingests property and underwriting workbook (`.xlsx`, `.csv`), creates or updates deal with full unit mix.
+- `POST /deals/{id}/import/financing`: Ingests debt terms and updates financing structure.
+- `GET /deals/templates/underwriting`: Downloads standardized, pre-formatted Excel template with instructions, validation dropdowns, and sample deals.
+
+---
+
+## Phase 11 — Frontend User Experience
+
+### 11.1 Dynamic Asset-Class Form Layout
+- Housing type selector dynamically toggles custom fieldsets:
+  - *Student Housing*: Bed count focus, tech/furniture fees, turn month.
+  - *Suburban Garden*: Parking stalls, storage, pet rent, RUBS.
+  - *Urban Mid-Rise*: Structured garage stalls, retail leases, high-density amenities.
+
+### 11.2 Unit Mix Matrix Component
+- Tabular input grid for Studio, 1BR, 2BR, 3BR, 4BR+ with live computed totals:
+  - Total Units, Total Beds, Total GPR, Weighted Avg Rent/Unit, Weighted Avg Rent/Sq Ft.
+
+### 11.3 Debt Structure Configurator
+- Loan type selector: Fixed vs. Floating (SOFR + spread).
+- Interest-Only duration selector (0 to 5 years).
+- Multi-tranche mezzanine toggle.
+
+### 11.4 Excel Drag-and-Drop Ingestion Modal
+- Modal with template download link, drag-and-drop file upload zone, client-side preview, validation summary, and one-click import into deal pipeline.
+
