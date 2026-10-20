@@ -116,15 +116,17 @@ def load_rows(
     for row in rows:
         current = existing.get((row.geography, row.period))
         if current is None:
-            db.add(
-                MarketRent(
-                    source=source,
-                    geography=row.geography,
-                    sub_asset_class=sub_asset_class,
-                    period=row.period,
-                    median_rent=row.median_rent,
-                )
+            created = MarketRent(
+                source=source,
+                geography=row.geography,
+                sub_asset_class=sub_asset_class,
+                period=row.period,
+                median_rent=row.median_rent,
             )
+            db.add(created)
+            # A CSV can repeat a (geography, period); track the new row so a
+            # repeat updates it instead of inserting a duplicate.
+            existing[(row.geography, row.period)] = created
             inserted += 1
         elif current.median_rent != row.median_rent:
             current.median_rent = row.median_rent

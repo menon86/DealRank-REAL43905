@@ -83,3 +83,50 @@ def test_geography_is_required_and_unknown_deal_404s(client):
     deal_id = client.post("/deals", json=SUBURBAN_GARDEN_PAYLOAD).json()["id"]
     assert client.get(f"/deals/{deal_id}/rent-check").status_code == 422
     assert _check(client, "00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+ZORI_CSV = (
+    "RegionID,SizeRank,RegionName,RegionType,StateName,2025-08-31,2025-09-30\n"
+    '394463,1,"Indianapolis, IN",msa,IN,1300,1320\n'
+    '394463,2,"Columbus, OH",msa,OH,,1400\n'
+)
+
+
+def _upload(client, body, **params):
+    params = {"source": "zillow_zori", **params}
+    return client.post(
+        "/market-rents/upload", params=params, content=body, headers={"content-type": "text/csv"}
+    )
+
+
+def test_upload_loads_rows_and_is_idempotent(client):
+    first = _upload(client, ZORI_CSV)
+    assert first.status_code == 200
+    assert first.json() == {
+        "source": "zillow_zori",
+        "inserted": 3,
+        "updated": 0,
+        "geographies": 2,
+    }
+    again = _upload(client, ZORI_CSV).json()
+    assert again["inserted"] == 0 and again["updated"] == 0
+
+    geos = {g["geography"] for g in client.get("/market-rents/geographies").json()}
+    assert geos == {"Indianapolis, IN", "Columbus, OH"}
+
+    deal_id = client.post("/deals", json=SUBURBAN_GARDEN_PAYLOAD).json()["id"]
+    check = _check(client, deal_id, geography="Indianapolis, IN").json()
+    assert D(check["market_rent"]) == D("1320.00")
+
+
+def test_upload_collapses_repeated_geography_period_rows(client):
+    doubled = ZORI_CSV + '394463,3,"Indianapolis, IN",msa,IN,1301,1321\n'
+    body = _upload(client, doubled).json()
+    assert body["inserted"] == 3 and body["updated"] == 2
+
+
+def test_upload_rejects_bad_files(client):
+    assert _upload(client, "").status_code == 422
+    assert _upload(client, "a,b\n1,2\n").status_code == 422
+    assert _upload(client, b"\xff\xfe\x00bad").status_code == 422
+    assert _upload(client, ZORI_CSV, source="costar").status_code == 422

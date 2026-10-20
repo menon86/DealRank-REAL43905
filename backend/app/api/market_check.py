@@ -1,16 +1,17 @@
 """Rent sanity check against loaded Zillow / Apartment List CSV data."""
 
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.analysis_schemas import GeographyOut, RentCheckOut
+from app.api.analysis_schemas import GeographyOut, RentCheckOut, RentUploadOut
 from app.db import get_db
 from app.models.deal import Deal
 from app.models.market_rent import MarketRent
-from app.services.market_rents import check_rent
+from app.services.market_rents import ALL_CLASSES, check_rent, load_rows, parse_wide_rent_csv
 
 router = APIRouter(tags=["market-check"])
 
@@ -47,4 +48,44 @@ def rent_check(
         market_yoy_growth=result.market_yoy_growth,
         deal_rent_growth=deal.rent_growth_rate,
         note=result.note,
+    )
+
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+@router.post("/market-rents/upload", response_model=RentUploadOut)
+async def upload_market_rents(
+    request: Request,
+    source: Literal["zillow_zori", "apartment_list"],
+    months: int = Query(default=24, ge=1, le=120),
+    db: Session = Depends(get_db),
+) -> RentUploadOut:
+    """Loads a Zillow ZORI or Apartment List CSV sent as the raw request body
+    (Content-Type: text/csv). Same parser and idempotent upsert as
+    ingest_market_rents.py, so re-uploading a refreshed file is safe.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="CSV is larger than 25 MB.")
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=422, detail="The uploaded file is empty.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="CSV is larger than 25 MB.")
+    try:
+        rows = parse_wide_rent_csv(raw.decode("utf-8-sig"), months)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="File must be UTF-8 CSV text.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not rows:
+        raise HTTPException(status_code=422, detail="No rent values found in the file.")
+    inserted, updated = load_rows(db, source, rows, ALL_CLASSES)
+    db.commit()
+    return RentUploadOut(
+        source=source,
+        inserted=inserted,
+        updated=updated,
+        geographies=len({r.geography for r in rows}),
     )

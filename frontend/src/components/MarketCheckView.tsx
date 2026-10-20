@@ -32,16 +32,43 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
   const [result, setResult] = useState<RentCheckOut | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadSource, setUploadSource] = useState<"zillow_zori" | "apartment_list">("zillow_zori");
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    client
+  function loadGeographies() {
+    return client
       .listGeographies()
       .then((g) => {
         setGeographies(g);
         if (g.length > 0) setGeography((prev) => prev || g[0].geography);
       })
       .catch((err) => setError(client.describeError(err)));
+  }
+
+  useEffect(() => {
+    void loadGeographies();
   }, []);
+
+  async function handleUpload(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    setUploadMessage(null);
+    setUploadError(null);
+    try {
+      const result = await client.uploadMarketRents(uploadSource, await file.text());
+      setUploadMessage(
+        `Loaded ${result.geographies.toLocaleString()} geographies ` +
+          `(${result.inserted.toLocaleString()} new rows, ${result.updated.toLocaleString()} updated).`,
+      );
+      await loadGeographies();
+    } catch (err) {
+      setUploadError(`Upload failed. ${client.describeError(err)}`);
+    } finally {
+      setUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!dealId && deals.length > 0) setDealId(defaultDealId(deals));
@@ -82,9 +109,51 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
         <>
           {geographies.length === 0 && (
             <div className="status-banner info" role="status">
-              No market rent data is loaded yet. Download a ZORI or Apartment List CSV and load it
-              with <code>python ingest_market_rents.py zillow_zori &lt;file.csv&gt;</code>. You can
-              still type a geography once data exists.
+              No market rent data is loaded yet. Download a Zillow ZORI or Apartment List CSV and
+              upload it below.
+            </div>
+          )}
+          <div className="control-grid">
+            <div className="field">
+              <label htmlFor="mr-source">Rent data source</label>
+              <select
+                id="mr-source"
+                value={uploadSource}
+                onChange={(e) => setUploadSource(e.target.value as typeof uploadSource)}
+              >
+                <option value="zillow_zori">Zillow ZORI (CSV)</option>
+                <option value="apartment_list">Apartment List (CSV)</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="mr-file">
+                {geographies.length > 0 ? "Refresh data" : "Load data"}
+              </label>
+              <input
+                id="mr-file"
+                type="file"
+                accept=".csv,text/csv"
+                disabled={uploading}
+                onChange={(e) => {
+                  void handleUpload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          </div>
+          {uploading && (
+            <span className="inline-status" role="status">
+              <span className="spinner" aria-hidden="true" /> Loading rent data…
+            </span>
+          )}
+          {uploadMessage && (
+            <div className="status-banner info" role="status">
+              {uploadMessage}
+            </div>
+          )}
+          {uploadError && (
+            <div className="status-banner error" role="alert">
+              {uploadError}
             </div>
           )}
           <div className="control-grid">

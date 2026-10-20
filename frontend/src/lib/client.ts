@@ -416,3 +416,26 @@ export function buildReportUrl(
   params.set("hurdle_rate", String(hurdleRate));
   return `${API_BASE_URL}/reports/${kind}?${params.toString()}`;
 }
+
+export interface RentUploadResult {
+  source: string;
+  inserted: number;
+  updated: number;
+  geographies: number;
+}
+
+/**
+ * POST /market-rents/upload: sends a Zillow ZORI / Apartment List CSV as the
+ * raw request body (the same load as ingest_market_rents.py). Re-uploading a
+ * refreshed file updates changed values in place.
+ */
+export async function uploadMarketRents(
+  source: "zillow_zori" | "apartment_list",
+  csvText: string,
+): Promise<RentUploadResult> {
+  return request<RentUploadResult>(`/market-rents/upload?source=${source}`, {
+    method: "POST",
+    headers: { "Content-Type": "text/csv" },
+    body: csvText,
+  });
+}

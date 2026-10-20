@@ -187,6 +187,13 @@ class RentCheckOut(BaseModel):
     note: str
 
 
+class RentUploadOut(BaseModel):
+    source: str
+    inserted: int
+    updated: int
+    geographies: int
+
+
 class GeographyOut(BaseModel):
     geography: str
     source: str
