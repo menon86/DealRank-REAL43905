@@ -13,7 +13,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    PageBreak,
+    KeepTogether,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -189,7 +189,11 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
     row("Net sale proceeds", lambda e: money(e.metrics.net_sale_proceeds), bold=True)
 
     deal_col_width = (_CONTENT_WIDTH - _LABEL_COL_WIDTH) / len(entries)
-    table = Table(rows, colWidths=[_LABEL_COL_WIDTH] + [deal_col_width] * len(entries))
+    # repeatRows: if the table ever runs past a page, the deal-name header
+    # row is redrawn at the top of the next page.
+    table = Table(
+        rows, colWidths=[_LABEL_COL_WIDTH] + [deal_col_width] * len(entries), repeatRows=1
+    )
 
     style = TableStyle(_TABLE_STYLE.getCommands())
     for r in section_rows:
@@ -238,11 +242,51 @@ def _ranking_table(entries: list[RankedEntry]) -> Table:
                 spread_str,
             ]
         )
-    table = Table(rows, colWidths=[0.5 * inch, 2.8 * inch, 1.4 * inch, 1.3 * inch, 1.3 * inch])
+    table = Table(
+        rows,
+        colWidths=[0.5 * inch, 2.8 * inch, 1.4 * inch, 1.3 * inch, 1.3 * inch],
+        repeatRows=1,
+    )
     style = TableStyle(_TABLE_STYLE.getCommands())
     style.add("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold")
     style.add("FONTNAME", (4, 1), (4, -1), "Helvetica-Bold")
     table.setStyle(style)
+    return table
+
+
+def _draw_footer(canvas, doc) -> None:
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.grey)
+    canvas.drawString(doc.leftMargin, 0.35 * inch, "DealRank — Deal Comparison & Ranking")
+    canvas.drawRightString(
+        doc.pagesize[0] - doc.rightMargin, 0.35 * inch, f"Page {canvas.getPageNumber()}"
+    )
+    canvas.restoreState()
+
+
+def _assumptions_table(deal) -> Table:
+    assumption_rows = [
+        [label, _format_assumption_value(field, getattr(deal, field))]
+        for field, label in _ASSUMPTION_FIELDS
+        if getattr(deal, field) is not None
+    ]
+    table = Table(assumption_rows, colWidths=[2.0 * inch, 1.45 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dfe3e8")),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 0),
+                    (-1, -1),
+                    [colors.white, colors.HexColor("#f6f7f9")],
+                ),
+            ]
+        )
+    )
     return table
 
 
@@ -257,6 +301,10 @@ def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
         rightMargin=0.6 * inch,
     )
 
+    # Each section is one KeepTogether block — heading, table and its note
+    # — so a page break can only fall between sections, never between a
+    # heading and its table or through the middle of a table. A block too
+    # tall for a whole page still splits, with its header row repeated.
     story: list = [
         Paragraph("DealRank — Deal Comparison &amp; Ranking", _TITLE),
         Paragraph(
@@ -264,57 +312,61 @@ def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
             _SUBTITLE,
         ),
         Spacer(1, 0.25 * inch),
-        Paragraph("Comparison", _H2),
-        _comparison_table(entries),
-        Spacer(1, 0.2 * inch),
-        Paragraph(
-            "Both IRRs are shown. Ranking (below) uses unlevered IRR only, against the "
-            "hurdle rate above; levered IRR is for reference and is never sorted on.",
-            _NOTE,
+        KeepTogether(
+            [
+                Paragraph("Comparison", _H2),
+                _comparison_table(entries),
+                Spacer(1, 0.2 * inch),
+                Paragraph(
+                    "Both IRRs are shown. Ranking (below) uses unlevered IRR only, against the "
+                    "hurdle rate above; levered IRR is for reference and is never sorted on.",
+                    _NOTE,
+                ),
+            ]
         ),
         Spacer(1, 0.3 * inch),
-        Paragraph("Ranking", _H2),
-        _ranking_table(entries),
-        Spacer(1, 0.15 * inch),
-        Paragraph(RANKING_BASIS_NOTE, _NOTE),
+        KeepTogether(
+            [
+                Paragraph("Ranking", _H2),
+                _ranking_table(entries),
+                Spacer(1, 0.15 * inch),
+                Paragraph(RANKING_BASIS_NOTE, _NOTE),
+            ]
+        ),
+        Spacer(1, 0.3 * inch),
     ]
 
-    story.append(PageBreak())
-    story.append(Paragraph("Assumptions", _H2))
-    story.append(
+    # Assumptions sit two deals side by side. Each pair is its own
+    # one-row table, and a table row never splits across pages, so a deal's
+    # name always stays with its inputs. The section heading travels with
+    # the first pair.
+    cards = [
+        [Paragraph(escape(entry.deal.name), _H3), _assumptions_table(entry.deal)]
+        for entry in entries
+    ]
+    pairs = [cards[i : i + 2] for i in range(0, len(cards), 2)]
+    intro = [
+        Paragraph("Assumptions", _H2),
         Paragraph(
-            "Every input behind the figures above, per deal, so this report is readable "
-            "without the live application.",
+            "Every input behind the figures above, per deal, so this report is "
+            "readable without the live application.",
             _BODY,
-        )
-    )
-    story.append(Spacer(1, 0.15 * inch))
-    for entry in entries:
-        deal = entry.deal
-        story.append(Paragraph(escape(deal.name), _H3))
-        assumption_rows = [
-            [label, _format_assumption_value(field, getattr(deal, field))]
-            for field, label in _ASSUMPTION_FIELDS
-            if getattr(deal, field) is not None
-        ]
-        table = Table(assumption_rows, colWidths=[2.2 * inch, 2.2 * inch])
-        table.setStyle(
+        ),
+        Spacer(1, 0.1 * inch),
+    ]
+    for index, pair in enumerate(pairs):
+        row = Table([pair + [""] * (2 - len(pair))], colWidths=[_CONTENT_WIDTH / 2] * 2)
+        row.setStyle(
             TableStyle(
                 [
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
-                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dfe3e8")),
-                    (
-                        "ROWBACKGROUNDS",
-                        (0, 0),
-                        (-1, -1),
-                        [colors.white, colors.HexColor("#f6f7f9")],
-                    ),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
                 ]
             )
         )
-        story.append(table)
-        story.append(Spacer(1, 0.2 * inch))
+        story.append(KeepTogether(intro + [row]) if index == 0 else row)
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
     return buffer.getvalue()
