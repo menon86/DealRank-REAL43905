@@ -57,8 +57,10 @@ def sweep(
         raise ValueError("steps must be at least 2")
     if high <= low:
         raise ValueError("high must be greater than low")
-    if variable == "exit_cap_rate" and low <= 0:
-        raise ValueError("exit_cap_rate must stay positive")
+    if variable == "exit_cap_rate" and (low <= 0 or high > 1):
+        raise ValueError("exit_cap_rate must stay between 0 and 100%")
+    if variable == "rent_growth_rate" and (low <= -1 or high > 1):
+        raise ValueError("rent_growth_rate must stay between -100% and 100%")
     increment = (high - low) / (steps - 1)
     points = []
     for i in range(steps):
