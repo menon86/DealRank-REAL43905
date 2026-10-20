@@ -78,3 +78,16 @@ def test_pptx_tables_fit_on_their_slides_at_five_deals(client):
         table = shape.table
         assert shape.top + sum(row.height for row in table.rows) <= prs.slide_height
         assert shape.left + sum(col.width for col in table.columns) <= prs.slide_width
+
+
+def test_pdf_report_survives_markup_characters_in_deal_names(client):
+    names = ["Smith & Sons Apts", "Bldg <A> Plaza", "<b>Bold</b> Place", '<img src="x"/>']
+    ids = [
+        client.post("/deals", json={**SUBURBAN_GARDEN_PAYLOAD, "name": name}).json()["id"]
+        for name in names
+    ]
+    resp = client.get(
+        "/reports/pdf", params=[("deal_ids", i) for i in ids] + [("hurdle_rate", "0.08")]
+    )
+    assert resp.status_code == 200
+    assert resp.content.startswith(b"%PDF-")

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { describeError } from "../lib/client";
 import { fractionToPercentInput, percentInputToFraction } from "../lib/format";
 import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
 import type { DealCreate, DealOut, LeasingMode, SubAssetClass } from "../lib/types";
@@ -105,6 +106,7 @@ function validate(form: FormState): FieldErrors {
   const isPerUnit = form.leasing_mode === "per_unit";
 
   if (isBlank(form.name)) errors.name = "Name is required.";
+  else if (form.name.trim().length > 255) errors.name = "Keep the name under 256 characters.";
 
   if (isPerUnit) {
     const units = parseNumber(form.unit_count);
@@ -133,11 +135,13 @@ function validate(form: FormState): FieldErrors {
   const opex = parseNumber(form.opex_annual);
   if (opex === null || opex < 0) errors.opex_annual = "Enter a non-negative amount.";
 
-  if (parseNumber(form.expense_growth_rate_pct) === null) {
-    errors.expense_growth_rate_pct = "Enter a percentage.";
+  const expenseGrowth = parseNumber(form.expense_growth_rate_pct);
+  if (expenseGrowth === null || expenseGrowth <= -100 || expenseGrowth > 100) {
+    errors.expense_growth_rate_pct = "Enter a percentage above -100 and up to 100.";
   }
-  if (parseNumber(form.rent_growth_rate_pct) === null) {
-    errors.rent_growth_rate_pct = "Enter a percentage.";
+  const rentGrowth = parseNumber(form.rent_growth_rate_pct);
+  if (rentGrowth === null || rentGrowth <= -100 || rentGrowth > 100) {
+    errors.rent_growth_rate_pct = "Enter a percentage above -100 and up to 100.";
   }
 
   const month = parseNumber(form.lease_expiration_month);
@@ -163,29 +167,35 @@ function validate(form: FormState): FieldErrors {
   }
 
   const loanAmount = parseNumber(form.loan_amount);
-  if (loanAmount === null || loanAmount < 0) errors.loan_amount = "Enter a non-negative amount.";
+  if (loanAmount === null || loanAmount < 0) {
+    errors.loan_amount = "Enter a non-negative amount.";
+  } else if (price !== null && loanAmount > price) {
+    errors.loan_amount = "Loan amount can't exceed the purchase price.";
+  }
 
   const interestRate = parseNumber(form.interest_rate_pct);
-  if (interestRate === null || interestRate < 0) {
-    errors.interest_rate_pct = "Enter a non-negative percentage.";
+  if (interestRate === null || interestRate < 0 || interestRate > 100) {
+    errors.interest_rate_pct = "Enter a percentage between 0 and 100.";
   }
 
   const amortYears = parseNumber(form.amortization_years);
-  if (amortYears === null || amortYears <= 0 || !Number.isInteger(amortYears)) {
-    errors.amortization_years = "Enter a positive whole number of years.";
+  if (amortYears === null || amortYears <= 0 || amortYears > 50 || !Number.isInteger(amortYears)) {
+    errors.amortization_years = "Enter a whole number of years from 1 to 50.";
   }
 
   const holdYears = parseNumber(form.hold_period_years);
-  if (holdYears === null || holdYears <= 0 || !Number.isInteger(holdYears)) {
-    errors.hold_period_years = "Enter a positive whole number of years.";
+  if (holdYears === null || holdYears <= 0 || holdYears > 30 || !Number.isInteger(holdYears)) {
+    errors.hold_period_years = "Enter a whole number of years from 1 to 30.";
   }
 
   const exitCap = parseNumber(form.exit_cap_rate_pct);
-  if (exitCap === null || exitCap <= 0) errors.exit_cap_rate_pct = "Enter a positive percentage.";
+  if (exitCap === null || exitCap <= 0 || exitCap > 100) {
+    errors.exit_cap_rate_pct = "Enter a percentage above 0 and up to 100.";
+  }
 
   const sellingCosts = parseNumber(form.selling_costs_rate_pct);
-  if (sellingCosts === null || sellingCosts < 0) {
-    errors.selling_costs_rate_pct = "Enter a non-negative percentage.";
+  if (sellingCosts === null || sellingCosts < 0 || sellingCosts >= 100) {
+    errors.selling_costs_rate_pct = "Enter a percentage from 0 up to (not including) 100.";
   }
 
   return errors;
@@ -193,13 +203,15 @@ function validate(form: FormState): FieldErrors {
 
 interface DealFormProps {
   initial: DealOut | null;
-  onSave: (input: DealCreate) => void;
+  onSave: (input: DealCreate) => Promise<void>;
   onCancel: () => void;
 }
 
 export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   const [form, setForm] = useState<FormState>(initial ? dealToFormState(initial) : DEFAULTS);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -215,8 +227,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
     return fieldErrors[key] ? <span className="field-error-text">{fieldErrors[key]}</span> : null;
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
 
     const errors = validate(form);
     setFieldErrors(errors);
@@ -249,7 +262,15 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       selling_costs_rate: percentInputToFraction(form.selling_costs_rate_pct),
     };
 
-    onSave(input);
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onSave(input);
+    } catch (err) {
+      // Keep the form open with the user's input and say what went wrong.
+      setSubmitError(`Couldn't save the deal. ${describeError(err)}`);
+      setSubmitting(false);
+    }
   }
 
   const isPerUnit = form.leasing_mode === "per_unit";
@@ -266,6 +287,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             id="name"
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
+            maxLength={255}
             placeholder="e.g. Campus View Student Housing"
             aria-invalid={!!fieldErrors.name}
           />
@@ -561,11 +583,17 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         <p className="field error">Please fix the highlighted fields above.</p>
       )}
 
+      {submitError && (
+        <div className="status-banner error" role="alert">
+          {submitError}
+        </div>
+      )}
+
       <div className="form-actions">
-        <button type="submit" className="primary">
-          {initial ? "Save changes" : "Add deal"}
+        <button type="submit" className="primary" disabled={submitting}>
+          {submitting ? "Saving…" : initial ? "Save changes" : "Add deal"}
         </button>
-        <button type="button" className="secondary" onClick={onCancel}>
+        <button type="button" className="secondary" onClick={onCancel} disabled={submitting}>
           Cancel
         </button>
       </div>

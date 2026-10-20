@@ -8,15 +8,18 @@ wire format.
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.api.ranking_data import RANKING_BASIS_NOTE
 from app.models.deal import LeasingMode, SubAssetClass
 
+DealName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
 
 class DealBase(BaseModel):
-    name: str
+    name: DealName
     sub_asset_class: SubAssetClass
     leasing_mode: LeasingMode
 
@@ -173,14 +176,15 @@ class MetricsOut(BaseModel):
 
 
 class RankRequest(BaseModel):
-    deal_ids: list[uuid.UUID] = Field(min_length=1)
-    hurdle_rate: Decimal
+    deal_ids: list[uuid.UUID] = Field(min_length=1, max_length=25)
+    hurdle_rate: Decimal = Field(ge=-1, le=1)
 
 
 class RankedDealOut(BaseModel):
     deal: DealOut
     metrics: MetricsOut
-    spread: Decimal
+    # None when the deal's unlevered IRR didn't converge (it sorts last).
+    spread: Decimal | None
     rank: int
     # 3.4 accept criterion: the response carries an explicit basis note,
     # so an exported report can't be read as ranking on levered returns.

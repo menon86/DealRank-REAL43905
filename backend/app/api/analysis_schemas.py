@@ -57,7 +57,7 @@ class QuestionnaireIn(BaseModel):
 
 
 class RiskRankRequest(BaseModel):
-    deal_ids: list[uuid.UUID] = Field(min_length=1)
+    deal_ids: list[uuid.UUID] = Field(min_length=1, max_length=25)
     dscr_minimum: Decimal = Field(default=DEFAULT_DSCR_MINIMUM, ge=0, le=5)
     # Optional manual 10-Year Treasury (decimal fraction); default is live FRED.
     treasury_yield: Decimal | None = Field(default=None, ge=0, le=1)

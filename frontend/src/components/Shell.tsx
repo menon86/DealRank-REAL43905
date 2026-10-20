@@ -25,11 +25,13 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
         <span className="subtitle">Deal comparison &amp; ranking — Deliverable 3</span>
       </div>
 
-      <div className="tab-strip">
+      <div className="tab-strip" role="tablist" aria-label="Views">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            role="tab"
+            aria-selected={tab.id === activeTab}
             className={tab.id === activeTab ? "active" : ""}
             onClick={() => onTabChange(tab.id)}
           >
