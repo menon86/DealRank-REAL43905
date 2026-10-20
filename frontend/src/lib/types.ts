@@ -9,6 +9,63 @@
 export type SubAssetClass = "student_housing" | "suburban_garden" | "urban_midrise";
 export type LeasingMode = "per_unit" | "per_bed";
 
+export type LayerGroup = "senior" | "subordinate" | "equity";
+export type LayerType =
+  // Senior debt
+  | "agency_fannie_mae"
+  | "agency_freddie_mac"
+  | "hud_223f"
+  | "hud_221d4"
+  | "bank_credit_union"
+  | "life_company"
+  | "cmbs"
+  | "bridge_debt_fund"
+  | "construction"
+  | "loan_assumption"
+  | "seller_financing"
+  | "other_senior"
+  // Subordinate / gap
+  | "mezzanine"
+  | "preferred_equity"
+  | "supplemental_loan"
+  | "seller_carryback_second"
+  | "other_subordinate"
+  // Equity
+  | "sponsor_gp"
+  | "lp_syndication"
+  | "jv_partner"
+  | "exchange_1031"
+  | "dst_tic"
+  | "opportunity_zone"
+  | "all_cash"
+  | "other_equity";
+export type RateType = "fixed" | "floating";
+
+/**
+ * One capital stack layer (backend/app/api/schemas.py CapitalStackLayer).
+ * Debt layers use the rate/term fields, preferred equity uses
+ * preferred_return, equity layers only amount and label.
+ */
+export interface CapitalStackLayer {
+  type: LayerType;
+  label: string | null;
+  amount: number;
+  rate_type: RateType;
+  interest_rate: number | null;
+  index_name: string | null;
+  index_rate: number | null;
+  spread: number | null;
+  io_months: number;
+  /** null = interest-only for the whole term. */
+  amortization_years: number | null;
+  /** null = no maturity before the exit. */
+  term_years: number | null;
+  recourse: boolean | null;
+  rate_cap_cost: number;
+  origination_fee_rate: number;
+  preferred_return: number | null;
+}
+
 export interface DealInputFields {
   name: string;
   sub_asset_class: SubAssetClass;
@@ -36,6 +93,11 @@ export interface DealInputFields {
   loan_amount: number;
   interest_rate: number;
   amortization_years: number;
+  /**
+   * null = the single loan above. When set, the backend overwrites
+   * loan_amount / interest_rate / amortization_years from the senior layer.
+   */
+  capital_stack: CapitalStackLayer[] | null;
 
   hold_period_years: number;
   exit_cap_rate: number;
@@ -66,27 +128,44 @@ export interface AnnualCashFlowOut {
   ending_loan_balance: number;
   levered_cash_flow: number;
   unlevered_cash_flow: number;
+  /** debt_service is every debt layer; this is the senior loan's share. */
+  senior_debt_service: number;
+  /** A loan maturing inside the hold, repaid out of that year's cash flow. */
+  balloon_payment: number;
+  preferred_distribution: number;
 }
 
 export interface MetricsOut {
   annual_cash_flows: AnnualCashFlowOut[];
   year_one_noi: number;
   going_in_cap_rate: number;
+  /** Combined DSCR: NOI ÷ debt service on every debt layer. */
   year_one_dscr: number | null;
+  /** NOI ÷ senior loan debt service only. */
+  year_one_senior_dscr: number | null;
   cash_on_cash: number | null;
   unlevered_irr: number | null;
   levered_irr: number | null;
   equity_multiple: number | null;
   exit_value: number;
   net_sale_proceeds: number;
-  /** Purchase price + closing costs − loan amount. */
+  /**
+   * Common equity: price + closing costs + financing fees − all debt −
+   * preferred equity.
+   */
   equity_invested: number;
   /** Sum of every year's levered cash flow plus net sale proceeds. */
   total_distributions: number;
   /** NOI for year hold_period_years + 1, the basis of exit value. */
   forward_noi: number;
   selling_costs: number;
+  /** Every debt layer's outstanding balance at exit. */
   loan_balance_at_exit: number;
+  total_debt: number;
+  preferred_equity: number;
+  /** Origination fees and rate caps, paid at closing out of equity. */
+  upfront_financing_costs: number;
+  preferred_equity_repayment: number;
 }
 
 export interface RankedDealOut {

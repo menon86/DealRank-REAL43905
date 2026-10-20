@@ -22,6 +22,7 @@ from reportlab.platypus import (
 )
 
 from app.api.ranking_data import RANKING_BASIS_NOTE, RankedEntry
+from app.reports.capital_stack import CAPITAL_STACK_HEADERS, capital_stack_rows
 from app.reports.formatting import money, multiple, number, percent
 
 _STYLES = getSampleStyleSheet()
@@ -169,13 +170,15 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
     row("Less: operating expenses", lambda e: money(year_one(e).opex))
     row("Less: turnover expense", lambda e: money(year_one(e).turnover_expense))
     row("Year 1 NOI", lambda e: money(e.metrics.year_one_noi), bold=True)
-    row("Debt service", lambda e: money(year_one(e).debt_service))
+    row("Debt service (all debt)", lambda e: money(year_one(e).debt_service))
+    row("Preferred return", lambda e: money(year_one(e).preferred_distribution))
     section("Headline metrics")
     ranking_basis_row = len(rows)
     row(_RANKING_BASIS_LABEL, lambda e: percent(e.metrics.unlevered_irr), bold=True)
     row("Levered IRR (reference)", lambda e: percent(e.metrics.levered_irr))
     row("Going-in cap rate", lambda e: percent(e.metrics.going_in_cap_rate))
-    row("Year 1 DSCR", lambda e: number(e.metrics.year_one_dscr))
+    row("Year 1 senior DSCR", lambda e: number(e.metrics.year_one_senior_dscr))
+    row("Year 1 combined DSCR", lambda e: number(e.metrics.year_one_dscr))
     row("Equity invested", lambda e: money(e.metrics.equity_invested))
     row("Cash-on-cash", lambda e: percent(e.metrics.cash_on_cash))
     row("Total distributions", lambda e: money(e.metrics.total_distributions))
@@ -185,7 +188,8 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
     row("Exit cap rate", lambda e: percent(e.deal.exit_cap_rate))
     row("Exit value", lambda e: money(e.metrics.exit_value), bold=True)
     row("Less: selling costs", lambda e: money(e.metrics.selling_costs))
-    row("Less: loan balance at exit", lambda e: money(e.metrics.loan_balance_at_exit))
+    row("Less: debt balance at exit", lambda e: money(e.metrics.loan_balance_at_exit))
+    row("Less: preferred equity repaid", lambda e: money(e.metrics.preferred_equity_repayment))
     row("Net sale proceeds", lambda e: money(e.metrics.net_sale_proceeds), bold=True)
 
     deal_col_width = (_CONTENT_WIDTH - _LABEL_COL_WIDTH) / len(entries)
@@ -242,6 +246,29 @@ def _ranking_table(entries: list[RankedEntry]) -> Table:
     style = TableStyle(_TABLE_STYLE.getCommands())
     style.add("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold")
     style.add("FONTNAME", (4, 1), (4, -1), "Helvetica-Bold")
+    table.setStyle(style)
+    return table
+
+
+def _capital_stack_table(entry: RankedEntry) -> Table:
+    rows: list[list] = [
+        [
+            Paragraph(header, _HEADER_CELL if i < 2 else _HEADER_CELL_RIGHT)
+            for i, header in enumerate(CAPITAL_STACK_HEADERS)
+        ]
+    ]
+    for cells in capital_stack_rows(entry.deal, entry.metrics):
+        rows.append(
+            [Paragraph(escape(cells[0]), _BODY_CELL), cells[1], cells[2], cells[3]]
+            + [Paragraph(escape(cell), _BODY_CELL) for cell in cells[4:]]
+        )
+    table = Table(
+        rows,
+        colWidths=[1.9 * inch, 0.9 * inch, 1.0 * inch, 0.7 * inch, 1.2 * inch, 1.6 * inch],
+    )
+    style = TableStyle(_TABLE_STYLE.getCommands())
+    style.add("ALIGN", (1, 0), (1, -1), "LEFT")
+    style.add("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")
     table.setStyle(style)
     return table
 
@@ -314,6 +341,8 @@ def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
             )
         )
         story.append(table)
+        story.append(Spacer(1, 0.12 * inch))
+        story.append(_capital_stack_table(entry))
         story.append(Spacer(1, 0.2 * inch))
 
     doc.build(story)

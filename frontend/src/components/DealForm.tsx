@@ -1,10 +1,19 @@
 import { useRef, useState } from "react";
+import {
+  LAYER_OPTIONS,
+  blankLayer,
+  formToLayer,
+  initialLayers,
+  layerAmount,
+  layerGroup,
+  validateLayers,
+} from "../lib/capitalStack";
+import type { LayerForm } from "../lib/capitalStack";
 import { describeError } from "../lib/client";
 import { fractionToPercentInput, percentInputToFraction } from "../lib/format";
 import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
 import type { DealCreate, DealOut, LeasingMode, SubAssetClass } from "../lib/types";
-
-export type LoanStructure = "fixed_amortizing" | "interest_only" | "floating_rate" | "balloon_mini_perm";
+import { CapitalStackEditor } from "./CapitalStackEditor";
 
 interface UnitMixTier {
   id: string;
@@ -33,19 +42,12 @@ interface FormState {
   annual_turnover_rate_pct: string;
   purchase_price: string;
   closing_costs: string;
-  loan_amount: string;
-  interest_rate_pct: string;
+  // Only kept so a deal saved before capital stacks keeps its loan's
+  // amortization if the user picks an all-cash or interest-only stack.
   amortization_years: string;
   hold_period_years: string;
   exit_cap_rate_pct: string;
   selling_costs_rate_pct: string;
-
-  // Financing flexibility extensions
-  loan_structure: LoanStructure;
-  io_period_years: string;
-  sofr_base_rate_pct: string;
-  spread_bps: string;
-  loan_term_years: string;
 
   // Suburban Garden specific
   surface_parking_stalls: string;
@@ -96,18 +98,10 @@ const DEFAULTS: FormState = {
   annual_turnover_rate_pct: "50",
   purchase_price: "22000000",
   closing_costs: "440000",
-  loan_amount: "14300000",
-  interest_rate_pct: "6.25",
   amortization_years: "30",
   hold_period_years: "10",
   exit_cap_rate_pct: "5.75",
   selling_costs_rate_pct: "2",
-
-  loan_structure: "fixed_amortizing",
-  io_period_years: "2",
-  sofr_base_rate_pct: "4.8",
-  spread_bps: "175",
-  loan_term_years: "10",
 
   surface_parking_stalls: "180",
   covered_parking_stalls: "40",
@@ -129,6 +123,21 @@ const DEFAULTS: FormState = {
   commercial_rent_sqft_annual: "32",
 };
 
+/** A new deal starts with a typical agency loan plus sponsor equity. */
+function defaultLayers(): LayerForm[] {
+  return [
+    {
+      ...blankLayer("agency_fannie_mae"),
+      amount: "14300000",
+      interest_rate_pct: "6.25",
+      amortization_years: "30",
+      term_years: "10",
+      recourse: "non_recourse",
+    },
+    { ...blankLayer("sponsor_gp"), amount: "8140000" },
+  ];
+}
+
 function dealToFormState(deal: DealOut): FormState {
   return {
     ...DEFAULTS,
@@ -149,13 +158,63 @@ function dealToFormState(deal: DealOut): FormState {
     annual_turnover_rate_pct: fractionToPercentInput(deal.annual_turnover_rate),
     purchase_price: deal.purchase_price.toString(),
     closing_costs: deal.closing_costs.toString(),
-    loan_amount: deal.loan_amount.toString(),
-    interest_rate_pct: fractionToPercentInput(deal.interest_rate),
     amortization_years: deal.amortization_years.toString(),
     hold_period_years: deal.hold_period_years.toString(),
     exit_cap_rate_pct: fractionToPercentInput(deal.exit_cap_rate),
     selling_costs_rate_pct: fractionToPercentInput(deal.selling_costs_rate),
   };
+}
+
+/**
+ * Builds the capital stack from the financing CSV template: the senior
+ * loan, plus mezzanine and preferred equity layers when their amounts are
+ * above zero. Equity layers already on the form are kept (a sponsor layer
+ * is added if there are none). Also reads the older template's
+ * loan_structure / io_period_years / sofr_base_rate_pct / loan_term_years.
+ */
+function layersFromFinancingCsv(data: Record<string, string>, current: LayerForm[]): LayerForm[] {
+  const n = (key: string) => (data[key] ?? "").trim();
+  const positive = (key: string) => Number(n(key)) > 0;
+
+  const seniorType = n("senior_loan_type") as LayerForm["type"];
+  const knownSenior = LAYER_OPTIONS.some((o) => o.type === seniorType && o.group === "senior");
+  const floating = n("rate_type") === "floating" || n("loan_structure") === "floating_rate";
+  const ioMonths =
+    n("io_months") || (n("io_period_years") ? String(Number(n("io_period_years")) * 12) : "0");
+
+  const senior: LayerForm = {
+    ...blankLayer(knownSenior ? seniorType : "other_senior"),
+    label: knownSenior ? "" : "Senior loan",
+    amount: n("loan_amount"),
+    rate_type: floating ? "floating" : "fixed",
+    interest_rate_pct: n("interest_rate_pct"),
+    index_name: n("index_name") || "SOFR",
+    index_rate_pct: n("index_rate_pct") || n("sofr_base_rate_pct"),
+    spread_bps: n("spread_bps"),
+    io_months: ioMonths,
+    amortization_years: n("amortization_years") || "30",
+    term_years: n("term_years") || n("loan_term_years"),
+    recourse: n("recourse") === "recourse" || n("recourse") === "non_recourse" ? (n("recourse") as LayerForm["recourse"]) : "",
+    origination_fee_pct: n("origination_fee_pct") || "0",
+    rate_cap_cost: n("rate_cap_cost") || "0",
+  };
+  const next: LayerForm[] = [senior];
+  if (positive("mezzanine_loan_amount")) {
+    next.push({
+      ...blankLayer("mezzanine"),
+      amount: n("mezzanine_loan_amount"),
+      interest_rate_pct: n("mezzanine_interest_rate_pct"),
+    });
+  }
+  if (positive("preferred_equity_amount")) {
+    next.push({
+      ...blankLayer("preferred_equity"),
+      amount: n("preferred_equity_amount"),
+      preferred_return_pct: n("preferred_return_pct"),
+    });
+  }
+  const equity = current.filter((l) => layerGroup(l.type) === "equity" && l.type !== "all_cash");
+  return [...next, ...(equity.length > 0 ? equity : [blankLayer("sponsor_gp")])];
 }
 
 type FieldErrors = Partial<Record<keyof FormState, string>>;
@@ -234,23 +293,6 @@ function validate(form: FormState): FieldErrors {
     errors.closing_costs = "Enter a non-negative amount.";
   }
 
-  const loanAmount = parseNumber(form.loan_amount);
-  if (loanAmount === null || loanAmount < 0) {
-    errors.loan_amount = "Enter a non-negative amount.";
-  } else if (price !== null && loanAmount > price) {
-    errors.loan_amount = "Loan amount can't exceed the purchase price.";
-  }
-
-  const interestRate = parseNumber(form.interest_rate_pct);
-  if (interestRate === null || interestRate < 0 || interestRate > 100) {
-    errors.interest_rate_pct = "Enter a percentage between 0 and 100.";
-  }
-
-  const amortYears = parseNumber(form.amortization_years);
-  if (amortYears === null || amortYears <= 0 || amortYears > 50 || !Number.isInteger(amortYears)) {
-    errors.amortization_years = "Enter a whole number of years from 1 to 50.";
-  }
-
   const holdYears = parseNumber(form.hold_period_years);
   if (holdYears === null || holdYears <= 0 || holdYears > 30 || !Number.isInteger(holdYears)) {
     errors.hold_period_years = "Enter a whole number of years from 1 to 30.";
@@ -283,6 +325,13 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   const [unitMix, setUnitMix] = useState<UnitMixTier[]>(DEFAULT_UNIT_MIX);
   const [showUnitMix, setShowUnitMix] = useState<boolean>(true);
   const [importNotice, setImportNotice] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [layers, setLayers] = useState<LayerForm[]>(() => initialLayers(initial, defaultLayers));
+  const [stackErrors, setStackErrors] = useState<string[]>([]);
+
+  function updateLayers(next: LayerForm[]) {
+    setLayers(next);
+    setStackErrors([]);
+  }
 
   const underwritingFileInputRef = useRef<HTMLInputElement | null>(null);
   const financingFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -394,41 +443,11 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
     });
   }
 
-  // --- Financing Computations ---
-  const loanPrincipal = Number(form.loan_amount) || 0;
+  // --- Capital Stack ---
   const purchasePriceVal = Number(form.purchase_price) || 0;
   const closingCostsVal = Number(form.closing_costs) || 0;
-  const interestRateDec = (Number(form.interest_rate_pct) || 0) / 100;
-  const amortYearsNum = Number(form.amortization_years) || 30;
-
-  const monthlyRate = interestRateDec / 12;
-  const nMonths = amortYearsNum * 12;
-
-  // Monthly amortizing payment
-  const monthlyAmortPayment =
-    loanPrincipal > 0 && monthlyRate > 0 && nMonths > 0
-      ? (loanPrincipal * (monthlyRate * Math.pow(1 + monthlyRate, nMonths))) /
-        (Math.pow(1 + monthlyRate, nMonths) - 1)
-      : 0;
-
-  // Monthly IO payment
-  const monthlyIoPayment = loanPrincipal > 0 ? loanPrincipal * monthlyRate : 0;
-
-  const isIO = form.loan_structure === "interest_only";
-  const displayedMonthlyPayment = isIO ? monthlyIoPayment : monthlyAmortPayment;
-  const displayedAnnualDebtService = displayedMonthlyPayment * 12;
-  const ltvPct = purchasePriceVal > 0 ? (loanPrincipal / purchasePriceVal) * 100 : 0;
-  const requiredEquity = Math.max(0, purchasePriceVal + closingCostsVal - loanPrincipal);
-
-  // Floating rate sync
-  function updateFloatingRate(sofr: string, spread: string) {
-    const sofrVal = Number(sofr) || 0;
-    const spreadVal = Number(spread) || 0;
-    const totalRate = sofrVal + spreadVal / 100;
-    set("sofr_base_rate_pct", sofr);
-    set("spread_bps", spread);
-    set("interest_rate_pct", totalRate.toFixed(2));
-  }
+  // "% of total cost" amounts are a share of price + closing costs.
+  const totalCost = purchasePriceVal + closingCostsVal;
 
   // --- Excel / CSV Template Downloads ---
   function downloadCsv(filename: string, content: string) {
@@ -483,16 +502,23 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   function handleDownloadFinancingTemplate() {
     const csvContent = [
       "Financing_Parameter,Value",
-      "loan_structure,interest_only",
+      "senior_loan_type,agency_fannie_mae",
       "loan_amount,15925000",
+      "rate_type,fixed",
       "interest_rate_pct,6.25",
-      "io_period_years,2",
+      "index_name,SOFR",
+      "index_rate_pct,",
+      "spread_bps,",
+      "io_months,24",
       "amortization_years,30",
-      "loan_term_years,10",
-      "sofr_base_rate_pct,4.8",
-      "spread_bps,175",
+      "term_years,10",
+      "recourse,non_recourse",
+      "origination_fee_pct,1",
+      "rate_cap_cost,0",
       "mezzanine_loan_amount,0",
       "mezzanine_interest_rate_pct,0",
+      "preferred_equity_amount,0",
+      "preferred_return_pct,0",
     ].join("\n");
     downloadCsv("dealrank_financing_template.csv", csvContent);
   }
@@ -588,17 +614,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       try {
         const text = e.target?.result as string;
         const { data } = parseCsvText(text);
-
-        if (data.loan_amount) set("loan_amount", data.loan_amount);
-        if (data.interest_rate_pct) set("interest_rate_pct", data.interest_rate_pct);
-        if (data.amortization_years) set("amortization_years", data.amortization_years);
-        if (data.io_period_years) set("io_period_years", data.io_period_years);
-        if (data.loan_structure && ["fixed_amortizing", "interest_only", "floating_rate", "balloon_mini_perm"].includes(data.loan_structure)) {
-          set("loan_structure", data.loan_structure as LoanStructure);
-        }
-        if (data.sofr_base_rate_pct) set("sofr_base_rate_pct", data.sofr_base_rate_pct);
-        if (data.spread_bps) set("spread_bps", data.spread_bps);
-        if (data.loan_term_years) set("loan_term_years", data.loan_term_years);
+        updateLayers(layersFromFinancingCsv(data, layers));
 
         setImportNotice({
           message: `Successfully imported financing details from "${file.name}"!`,
@@ -620,7 +636,24 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
 
     const errors = validate(form);
     setFieldErrors(errors);
-    if (Object.keys(errors).length > 0) return;
+    const layerErrors = validateLayers(layers, totalCost);
+    const seniorLayer = layers.find((layer) => layerGroup(layer.type) === "senior");
+    if (seniorLayer && layerAmount(seniorLayer, totalCost) > purchasePriceVal) {
+      layerErrors.push("The senior loan can't exceed the purchase price.");
+    }
+    setStackErrors(layerErrors);
+    if (Object.keys(errors).length > 0 || layerErrors.length > 0) return;
+
+    // The backend overwrites loan_amount / interest_rate /
+    // amortization_years from the senior layer; send the same values so
+    // the payload is self-consistent either way.
+    const capitalStack = layers.map((layer) => formToLayer(layer, totalCost));
+    const senior = capitalStack.find((layer) => layerGroup(layer.type) === "senior");
+    const seniorRate = senior
+      ? senior.rate_type === "floating"
+        ? (senior.index_rate ?? 0) + (senior.spread ?? 0)
+        : senior.interest_rate ?? 0
+      : 0;
 
     const isPerUnit = form.leasing_mode === "per_unit";
     const input: DealCreate = {
@@ -641,9 +674,10 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       annual_turnover_rate: percentInputToFraction(form.annual_turnover_rate_pct),
       purchase_price: Number(form.purchase_price) || 0,
       closing_costs: Number(form.closing_costs) || 0,
-      loan_amount: Number(form.loan_amount) || 0,
-      interest_rate: percentInputToFraction(form.interest_rate_pct),
-      amortization_years: Number(form.amortization_years) || 0,
+      loan_amount: senior?.amount ?? 0,
+      interest_rate: seniorRate,
+      amortization_years: senior?.amortization_years ?? (Number(form.amortization_years) || 30),
+      capital_stack: capitalStack,
       hold_period_years: Number(form.hold_period_years) || 0,
       exit_cap_rate: percentInputToFraction(form.exit_cap_rate_pct),
       selling_costs_rate: percentInputToFraction(form.selling_costs_rate_pct),
@@ -1260,121 +1294,14 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           />
           {fieldError("closing_costs")}
         </div>
-
-        <div className="field">
-          <label htmlFor="loan_structure">Loan structure</label>
-          <select
-            id="loan_structure"
-            value={form.loan_structure}
-            onChange={(e) => set("loan_structure", e.target.value as LoanStructure)}
-          >
-            <option value="fixed_amortizing">Fixed Rate Amortizing (30-Year)</option>
-            <option value="interest_only">Interest-Only Period (1–5 Years I/O)</option>
-            <option value="floating_rate">Floating Rate (SOFR + Spread)</option>
-            <option value="balloon_mini_perm">Balloon / Mini-Perm Term</option>
-          </select>
-        </div>
-
-        <div className="field">
-          <label htmlFor="loan_amount">Loan amount ($)</label>
-          <input
-            id="loan_amount"
-            type="number"
-            value={form.loan_amount}
-            onChange={(e) => set("loan_amount", e.target.value)}
-            aria-invalid={!!fieldErrors.loan_amount}
-          />
-          {fieldError("loan_amount")}
-        </div>
-
-        {form.loan_structure === "interest_only" && (
-          <div className="field">
-            <label htmlFor="io_period_years">Interest-Only period (years)</label>
-            <select
-              id="io_period_years"
-              value={form.io_period_years}
-              onChange={(e) => set("io_period_years", e.target.value)}
-            >
-              <option value="1">1 Year I/O</option>
-              <option value="2">2 Years I/O</option>
-              <option value="3">3 Years I/O</option>
-              <option value="4">4 Years I/O</option>
-              <option value="5">5 Years I/O</option>
-            </select>
-          </div>
-        )}
-
-        {form.loan_structure === "floating_rate" && (
-          <>
-            <div className="field">
-              <label>SOFR Base Rate (%)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.sofr_base_rate_pct}
-                onChange={(e) => updateFloatingRate(e.target.value, form.spread_bps)}
-              />
-            </div>
-            <div className="field">
-              <label>Lender Spread (bps)</label>
-              <input
-                type="number"
-                value={form.spread_bps}
-                onChange={(e) => updateFloatingRate(form.sofr_base_rate_pct, e.target.value)}
-              />
-            </div>
-          </>
-        )}
-
-        <div className="field">
-          <label htmlFor="interest_rate_pct">Interest rate (%)</label>
-          <input
-            id="interest_rate_pct"
-            type="number"
-            step="0.01"
-            value={form.interest_rate_pct}
-            onChange={(e) => set("interest_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.interest_rate_pct}
-          />
-          {fieldError("interest_rate_pct")}
-        </div>
-        <div className="field">
-          <label htmlFor="amortization_years">Amortization (years)</label>
-          <input
-            id="amortization_years"
-            type="number"
-            value={form.amortization_years}
-            onChange={(e) => set("amortization_years", e.target.value)}
-            aria-invalid={!!fieldErrors.amortization_years}
-          />
-          {fieldError("amortization_years")}
-        </div>
       </div>
 
-      {/* Live Debt Analytics Card */}
-      <div className="financing-summary-card">
-        <div className="financing-stat">
-          <span className="stat-label">Estimated Monthly Payment</span>
-          <span className="stat-value">
-            ${Math.round(displayedMonthlyPayment).toLocaleString()}
-            <small style={{ fontSize: "10px", fontWeight: "normal", color: "#15803d", marginLeft: "4px" }}>
-              ({isIO ? `${form.io_period_years}yr I/O` : "Amortizing"})
-            </small>
-          </span>
-        </div>
-        <div className="financing-stat">
-          <span className="stat-label">Annual Debt Service</span>
-          <span className="stat-value">${Math.round(displayedAnnualDebtService).toLocaleString()}</span>
-        </div>
-        <div className="financing-stat">
-          <span className="stat-label">Loan-to-Value (LTV)</span>
-          <span className="stat-value">{ltvPct.toFixed(1)}%</span>
-        </div>
-        <div className="financing-stat">
-          <span className="stat-label">Equity Required</span>
-          <span className="stat-value">${Math.round(requiredEquity).toLocaleString()}</span>
-        </div>
-      </div>
+      <CapitalStackEditor
+        layers={layers}
+        onChange={updateLayers}
+        totalCost={totalCost}
+        errors={stackErrors}
+      />
 
       {/* Hold & Exit */}
       <h3>Hold &amp; exit</h3>

@@ -24,6 +24,180 @@ class LeasingMode(str, enum.Enum):
     PER_BED = "per_bed"
 
 
+class LayerGroup(str, enum.Enum):
+    SENIOR = "senior"
+    SUBORDINATE = "subordinate"
+    EQUITY = "equity"
+
+
+class LayerType(str, enum.Enum):
+    """Every financing source a capital stack layer can be. The group
+    (senior debt / subordinate / equity) is fixed per type — see
+    LAYER_GROUPS below.
+    """
+
+    # --- Senior debt ---
+    AGENCY_FANNIE_MAE = "agency_fannie_mae"
+    AGENCY_FREDDIE_MAC = "agency_freddie_mac"
+    HUD_223F = "hud_223f"
+    HUD_221D4 = "hud_221d4"
+    BANK_CREDIT_UNION = "bank_credit_union"
+    LIFE_COMPANY = "life_company"
+    CMBS = "cmbs"
+    BRIDGE_DEBT_FUND = "bridge_debt_fund"
+    CONSTRUCTION = "construction"
+    LOAN_ASSUMPTION = "loan_assumption"
+    SELLER_FINANCING = "seller_financing"
+    OTHER_SENIOR = "other_senior"
+
+    # --- Subordinate / gap ---
+    MEZZANINE = "mezzanine"
+    PREFERRED_EQUITY = "preferred_equity"
+    SUPPLEMENTAL_LOAN = "supplemental_loan"
+    SELLER_CARRYBACK_SECOND = "seller_carryback_second"
+    OTHER_SUBORDINATE = "other_subordinate"
+
+    # --- Equity ---
+    SPONSOR_GP = "sponsor_gp"
+    LP_SYNDICATION = "lp_syndication"
+    JV_PARTNER = "jv_partner"
+    EXCHANGE_1031 = "exchange_1031"
+    DST_TIC = "dst_tic"
+    OPPORTUNITY_ZONE = "opportunity_zone"
+    ALL_CASH = "all_cash"
+    OTHER_EQUITY = "other_equity"
+
+    @property
+    def group(self) -> LayerGroup:
+        return LAYER_GROUPS[self]
+
+    @property
+    def is_debt(self) -> bool:
+        """Senior debt and every subordinate type except preferred equity
+        (which is equity, not a loan: it earns a preferred return, isn't
+        in debt service, and isn't in either DSCR).
+        """
+        return self.group is LayerGroup.SENIOR or (
+            self.group is LayerGroup.SUBORDINATE and self is not LayerType.PREFERRED_EQUITY
+        )
+
+    @property
+    def is_other(self) -> bool:
+        return self in (LayerType.OTHER_SENIOR, LayerType.OTHER_SUBORDINATE, LayerType.OTHER_EQUITY)
+
+
+LAYER_GROUPS: dict[LayerType, LayerGroup] = {
+    **{
+        t: LayerGroup.SENIOR
+        for t in (
+            LayerType.AGENCY_FANNIE_MAE,
+            LayerType.AGENCY_FREDDIE_MAC,
+            LayerType.HUD_223F,
+            LayerType.HUD_221D4,
+            LayerType.BANK_CREDIT_UNION,
+            LayerType.LIFE_COMPANY,
+            LayerType.CMBS,
+            LayerType.BRIDGE_DEBT_FUND,
+            LayerType.CONSTRUCTION,
+            LayerType.LOAN_ASSUMPTION,
+            LayerType.SELLER_FINANCING,
+            LayerType.OTHER_SENIOR,
+        )
+    },
+    **{
+        t: LayerGroup.SUBORDINATE
+        for t in (
+            LayerType.MEZZANINE,
+            LayerType.PREFERRED_EQUITY,
+            LayerType.SUPPLEMENTAL_LOAN,
+            LayerType.SELLER_CARRYBACK_SECOND,
+            LayerType.OTHER_SUBORDINATE,
+        )
+    },
+    **{
+        t: LayerGroup.EQUITY
+        for t in (
+            LayerType.SPONSOR_GP,
+            LayerType.LP_SYNDICATION,
+            LayerType.JV_PARTNER,
+            LayerType.EXCHANGE_1031,
+            LayerType.DST_TIC,
+            LayerType.OPPORTUNITY_ZONE,
+            LayerType.ALL_CASH,
+            LayerType.OTHER_EQUITY,
+        )
+    },
+}
+
+
+class RateType(str, enum.Enum):
+    FIXED = "fixed"
+    FLOATING = "floating"
+
+
+@dataclass(frozen=True)
+class FinancingLayer:
+    """One layer of a deal's capital stack. Debt and preferred equity
+    layers use the term fields; equity layers carry only an amount and an
+    optional label (common equity in the math is always the residual —
+    see app/engine/financing.py — so equity layer amounts describe who
+    put the equity in, they don't change it).
+    """
+
+    layer_type: LayerType
+    amount: Decimal
+    label: str | None = None
+
+    # --- Debt terms ---
+    rate_type: RateType = RateType.FIXED
+    interest_rate: Decimal | None = None  # fixed all-in rate
+    index_name: str | None = None  # floating: e.g. "SOFR"
+    index_rate: Decimal | None = None
+    spread: Decimal | None = None
+    io_months: int = 0
+    # None = interest-only for the whole term (common for mezzanine).
+    amortization_years: int | None = None
+    # None = no maturity before the exit. A maturity inside the hold is
+    # repaid as a balloon out of that year's levered cash flow (no
+    # refinancing is modeled).
+    term_years: int | None = None
+    recourse: bool | None = None  # descriptive only, no effect on the math
+
+    # --- Upfront costs, paid at closing out of equity ---
+    rate_cap_cost: Decimal = Decimal("0")
+    origination_fee_rate: Decimal = Decimal("0")
+
+    # --- Preferred equity only ---
+    preferred_return: Decimal | None = None
+
+    @property
+    def group(self) -> LayerGroup:
+        return self.layer_type.group
+
+    @property
+    def is_debt(self) -> bool:
+        return self.layer_type.is_debt
+
+    @property
+    def is_preferred_equity(self) -> bool:
+        return self.layer_type is LayerType.PREFERRED_EQUITY
+
+    @property
+    def all_in_rate(self) -> Decimal:
+        """Fixed: the interest rate. Floating: index + spread."""
+        if self.rate_type is RateType.FLOATING:
+            return (self.index_rate or Decimal("0")) + (self.spread or Decimal("0"))
+        return self.interest_rate or Decimal("0")
+
+    @property
+    def upfront_cost(self) -> Decimal:
+        """Origination fee plus rate cap — paid at closing, so it adds to
+        the equity check (levered returns only; unlevered ignores
+        financing entirely).
+        """
+        return self.amount * self.origination_fee_rate + self.rate_cap_cost
+
+
 @dataclass(frozen=True)
 class DealInputs:
     """Mirrors the nullable column pairs in app/models/deal.py: exactly one
@@ -65,6 +239,12 @@ class DealInputs:
     exit_cap_rate: Decimal
     selling_costs_rate: Decimal
 
+    # --- Capital stack ---
+    # Empty = the original single fixed-rate loan built from loan_amount /
+    # interest_rate / amortization_years above. Non-empty = these layers
+    # replace those three fields entirely (see app/engine/financing.py).
+    capital_stack: tuple[FinancingLayer, ...] = ()
+
     def __post_init__(self) -> None:
         if self.leasing_mode is LeasingMode.PER_UNIT:
             if self.unit_count is None or self.monthly_rent_per_unit is None:
@@ -80,6 +260,14 @@ class DealInputs:
                 raise ValueError("per_bed leasing mode must not carry unit fields")
         else:  # pragma: no cover - exhaustive enum guard
             raise ValueError(f"unknown leasing_mode: {self.leasing_mode}")
+
+        if self.capital_stack:
+            # Imported here: financing.py imports this module.
+            from app.engine.financing import validate_capital_stack
+
+            errors = validate_capital_stack(self.capital_stack)
+            if errors:
+                raise ValueError("; ".join(errors))
 
     @property
     def unit_or_bed_count(self) -> int:
@@ -108,6 +296,13 @@ class AnnualCashFlow:
     ending_loan_balance: Decimal
     levered_cash_flow: Decimal
     unlevered_cash_flow: Decimal
+    # Capital stack lines. debt_service above is every debt layer
+    # (combined); the senior share is split out for senior DSCR. A balloon
+    # is a loan maturing inside the hold, repaid out of that year's levered
+    # cash flow — it isn't debt service, so it's in neither DSCR.
+    senior_debt_service: Decimal = Decimal("0")
+    balloon_payment: Decimal = Decimal("0")
+    preferred_distribution: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -134,3 +329,11 @@ class DealMetrics:
     forward_noi: Decimal = Decimal("0")
     selling_costs: Decimal = Decimal("0")
     loan_balance_at_exit: Decimal = Decimal("0")
+    # Capital stack figures. year_one_dscr above is the combined DSCR
+    # (NOI over every debt layer's service); senior DSCR counts only the
+    # senior loan. Preferred equity is in neither.
+    year_one_senior_dscr: Decimal | None = None
+    total_debt: Decimal = Decimal("0")
+    preferred_equity: Decimal = Decimal("0")
+    upfront_financing_costs: Decimal = Decimal("0")
+    preferred_equity_repayment: Decimal = Decimal("0")

@@ -13,6 +13,7 @@ from decimal import Decimal
 
 import numpy_financial as npf
 
+from app.engine.financing import total_debt, total_preferred_equity, upfront_financing_costs
 from app.engine.types import DealInputs, DealMetrics
 from app.engine.waterfall import WaterfallResult, project
 
@@ -46,7 +47,17 @@ def dscr(noi: Decimal, debt_service: Decimal) -> Decimal | None:
 
 
 def equity_invested(deal: DealInputs) -> Decimal:
-    return deal.purchase_price + deal.closing_costs - deal.loan_amount
+    """Common equity: price + closing costs + upfront financing costs
+    (origination fees, rate caps), less every debt layer and preferred
+    equity. Without a capital stack this is price + closing − loan amount.
+    """
+    return (
+        deal.purchase_price
+        + deal.closing_costs
+        + upfront_financing_costs(deal)
+        - total_debt(deal)
+        - total_preferred_equity(deal)
+    )
 
 
 def compute(deal: DealInputs) -> DealMetrics:
@@ -57,7 +68,9 @@ def compute(deal: DealInputs) -> DealMetrics:
     equity = equity_invested(deal)
 
     cap_rate = going_in_cap_rate(deal, year_one.noi)
+    # Combined DSCR: NOI over every debt layer. Senior: the senior loan only.
     year_one_dscr = dscr(year_one.noi, year_one.debt_service)
+    year_one_senior_dscr = dscr(year_one.noi, year_one.senior_debt_service)
     cash_on_cash = (year_one.levered_cash_flow / equity) if equity != 0 else None
 
     # Levered stream: initial equity outlay, then each year's levered cash
@@ -98,4 +111,9 @@ def compute(deal: DealInputs) -> DealMetrics:
         forward_noi=result.forward_noi,
         selling_costs=result.selling_costs,
         loan_balance_at_exit=result.loan_balance_at_exit,
+        year_one_senior_dscr=year_one_senior_dscr,
+        total_debt=total_debt(deal),
+        preferred_equity=total_preferred_equity(deal),
+        upfront_financing_costs=upfront_financing_costs(deal),
+        preferred_equity_repayment=result.preferred_equity_repayment,
     )

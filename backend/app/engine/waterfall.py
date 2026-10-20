@@ -2,7 +2,13 @@
 
 Exit value uses forward NOI (decision D1, section 2): year N+1 NOI divided
 by the exit cap rate, where N = hold_period_years. Net sale proceeds are
-exit value less selling costs less the outstanding loan balance at exit.
+exit value less selling costs less the outstanding balance of every debt
+layer at exit, less the return of preferred equity's capital — debt and
+preferred equity are paid off ahead of common equity, in that order.
+
+Levered cash flow is NOI less debt service (every debt layer), less any
+balloon repaid inside the hold, less the preferred return paid to
+preferred equity. Unlevered cash flow is NOI, untouched by financing.
 """
 
 from __future__ import annotations
@@ -10,8 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.engine.debt import amortization_schedule
+from app.engine.debt import stack_schedule
 from app.engine.expenses import operating_expenses, turnover_expense
+from app.engine.financing import annual_preferred_distribution, total_preferred_equity
 from app.engine.revenue import effective_gross_income, gross_potential_rent
 from app.engine.types import AnnualCashFlow, DealInputs
 
@@ -26,6 +33,7 @@ class WaterfallResult:
     forward_noi: Decimal
     selling_costs: Decimal
     loan_balance_at_exit: Decimal
+    preferred_equity_repayment: Decimal = Decimal("0")
 
 
 def _noi_for_year(
@@ -44,14 +52,18 @@ def _noi_for_year(
 
 
 def project(deal: DealInputs) -> WaterfallResult:
-    debt_schedule = amortization_schedule(deal)
+    debt_schedule = stack_schedule(deal)
+    preferred_distribution = annual_preferred_distribution(deal)
 
     annual_cash_flows: list[AnnualCashFlow] = []
     for year in range(1, deal.hold_period_years + 1):
         gpr, vacancy_loss, egi, opex, turnover, noi = _noi_for_year(deal, year)
 
-        debt_year = debt_schedule[year - 1]
-        levered_cf = noi - debt_year.debt_service
+        stack_year = debt_schedule[year - 1]
+        debt_year = stack_year.combined
+        levered_cf = (
+            noi - debt_year.debt_service - debt_year.balloon_payment - preferred_distribution
+        )
         unlevered_cf = noi
 
         annual_cash_flows.append(
@@ -70,6 +82,9 @@ def project(deal: DealInputs) -> WaterfallResult:
                 ending_loan_balance=debt_year.ending_balance,
                 levered_cash_flow=levered_cf,
                 unlevered_cash_flow=unlevered_cf,
+                senior_debt_service=stack_year.senior_debt_service,
+                balloon_payment=debt_year.balloon_payment,
+                preferred_distribution=preferred_distribution,
             )
         )
 
@@ -77,9 +92,10 @@ def project(deal: DealInputs) -> WaterfallResult:
     _, _, _, _, _, forward_noi = _noi_for_year(deal, deal.hold_period_years + 1)
     exit_value = forward_noi / deal.exit_cap_rate
 
-    ending_balance = debt_schedule[-1].ending_balance if debt_schedule else Decimal("0")
+    ending_balance = debt_schedule[-1].combined.ending_balance if debt_schedule else Decimal("0")
+    preferred_repayment = total_preferred_equity(deal)
     selling_costs = exit_value * deal.selling_costs_rate
-    net_sale_proceeds = exit_value - selling_costs - ending_balance
+    net_sale_proceeds = exit_value - selling_costs - ending_balance - preferred_repayment
 
     return WaterfallResult(
         annual_cash_flows=annual_cash_flows,
@@ -88,4 +104,5 @@ def project(deal: DealInputs) -> WaterfallResult:
         forward_noi=forward_noi,
         selling_costs=selling_costs,
         loan_balance_at_exit=ending_balance,
+        preferred_equity_repayment=preferred_repayment,
     )

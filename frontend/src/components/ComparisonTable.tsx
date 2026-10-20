@@ -64,8 +64,13 @@ const YEAR_ONE_ROWS: Row[] = [
     kind: "subtotal",
   },
   {
-    label: "Debt service",
+    label: "Debt service (all debt)",
     value: (_, m) => formatMoney(m.annual_cash_flows[0]?.debt_service ?? null),
+    kind: "deduction",
+  },
+  {
+    label: "Preferred return",
+    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.preferred_distribution ?? null),
     kind: "deduction",
   },
   {
@@ -93,8 +98,22 @@ const RETURN_ROWS: Row[] = [
 const EQUITY_ROWS: Row[] = [
   { label: "Purchase price", value: (d) => formatMoney(d.purchase_price) },
   { label: "Closing costs", value: (d) => formatMoney(d.closing_costs), kind: "addition" },
-  { label: "Loan amount", value: (d) => formatMoney(d.loan_amount), kind: "deduction" },
-  { label: "Equity invested", value: (_, m) => formatMoney(m.equity_invested), kind: "subtotal" },
+  {
+    label: "Financing fees & rate caps",
+    value: (_, m) => formatMoney(m.upfront_financing_costs),
+    kind: "addition",
+  },
+  { label: "Total debt", value: (_, m) => formatMoney(m.total_debt), kind: "deduction" },
+  {
+    label: "Preferred equity",
+    value: (_, m) => formatMoney(m.preferred_equity),
+    kind: "deduction",
+  },
+  {
+    label: "Common equity invested",
+    value: (_, m) => formatMoney(m.equity_invested),
+    kind: "subtotal",
+  },
   { label: "Cash-on-cash", value: (_, m) => formatPercent(m.cash_on_cash) },
   { label: "Total distributions", value: (_, m) => formatMoney(m.total_distributions) },
   { label: "Equity multiple", value: (_, m) => formatMultiple(m.equity_multiple) },
@@ -102,7 +121,8 @@ const EQUITY_ROWS: Row[] = [
 
 const OPERATING_METRIC_ROWS: Row[] = [
   { label: "Going-in cap rate", value: (_, m) => formatPercent(m.going_in_cap_rate) },
-  { label: "Year 1 DSCR", value: (_, m) => formatNumber(m.year_one_dscr) },
+  { label: "Year 1 senior DSCR", value: (_, m) => formatNumber(m.year_one_senior_dscr) },
+  { label: "Year 1 combined DSCR", value: (_, m) => formatNumber(m.year_one_dscr) },
 ];
 
 const EXIT_ROWS: Row[] = [
@@ -111,8 +131,13 @@ const EXIT_ROWS: Row[] = [
   { label: "Exit value", value: (_, m) => formatMoney(m.exit_value), kind: "subtotal" },
   { label: "Selling costs", value: (_, m) => formatMoney(m.selling_costs), kind: "deduction" },
   {
-    label: "Loan balance at exit",
+    label: "Debt balance at exit",
     value: (_, m) => formatMoney(m.loan_balance_at_exit),
+    kind: "deduction",
+  },
+  {
+    label: "Preferred equity repaid",
+    value: (_, m) => formatMoney(m.preferred_equity_repayment),
     kind: "deduction",
   },
   {
@@ -130,14 +155,27 @@ const FORMULAS: [string, string][] = [
     "NOI (year n)",
     "Rent grows at the rent growth rate and expenses at the expense growth rate, compounded annually",
   ],
-  ["Equity invested", "Purchase price + closing costs − loan amount"],
+  [
+    "Common equity invested",
+    "Purchase price + closing costs + financing fees and rate caps − all debt − preferred equity",
+  ],
   ["Going-in cap rate", "Year 1 NOI ÷ purchase price"],
-  ["Annual debt service", "Standard amortizing payment from loan amount, rate and term"],
-  ["DSCR", "NOI ÷ annual debt service"],
-  ["Levered cash flow (year n)", "NOI (year n) − debt service"],
-  ["Cash-on-cash", "Year 1 levered cash flow ÷ equity invested"],
+  [
+    "Annual debt service",
+    "Each debt layer month by month: interest-only for its I/O period, then a level payment over the remaining amortization; floating rate = index + spread",
+  ],
+  ["Senior DSCR", "NOI ÷ senior loan debt service"],
+  ["Combined DSCR", "NOI ÷ debt service on every debt layer (preferred equity excluded)"],
+  [
+    "Levered cash flow (year n)",
+    "NOI (year n) − debt service − preferred return − any balloon from a loan maturing that year",
+  ],
+  ["Cash-on-cash", "Year 1 levered cash flow ÷ common equity invested"],
   ["Exit value", "NOI (year N+1) ÷ exit cap rate"],
-  ["Net sale proceeds", "Exit value − selling costs − remaining loan balance"],
+  [
+    "Net sale proceeds",
+    "Exit value − selling costs − remaining debt balances − preferred equity repaid",
+  ],
   ["Levered IRR", "IRR of −equity, levered cash flow years 1…N, plus net sale proceeds in year N"],
   [
     "Unlevered IRR",
@@ -145,7 +183,7 @@ const FORMULAS: [string, string][] = [
   ],
   [
     "Equity multiple",
-    "Total distributions (levered cash flows + net sale proceeds) ÷ equity invested",
+    "Total distributions (levered cash flows + net sale proceeds) ÷ common equity invested",
   ],
 ];
 
@@ -267,6 +305,7 @@ export function ComparisonTable({
       <p className="methodology-note">
         <strong>Unlevered IRR is the ranking basis.</strong> Both IRRs are shown, but the Rank tab
         sorts on unlevered IRR against your hurdle rate; levered IRR is for reference only.
+        Financing affects levered returns and DSCR only. Rankings use unlevered IRR.
       </p>
 
       <details className="formula-reference">

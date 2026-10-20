@@ -87,20 +87,33 @@ Specific operational drivers tailored to housing types. Fields not applicable to
 
 ### Sheet 4: `Financing`
 
-Detailed capital structure and debt parameters supporting institutional loan flexibility.
+Builds the deal's capital stack (see `docs/methodology.md` section 3): one senior loan, plus a
+mezzanine and a preferred equity layer when their amounts are above zero. Equity layers already
+on the form are kept. This is what the deal form's **Template (Financing)** download contains
+and what **Import Financing** reads.
 
 | Column Header | Data Type | Required | Default | Description / Validation | Example |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `loan_structure` | String | Yes | `fixed_amortizing` | Options: `fixed_amortizing`, `interest_only`, `floating_rate` | `interest_only` |
-| `loan_amount` | Decimal | Yes | — | Principal loan amount ($) | `18500000.00` |
-| `interest_rate` | Decimal / % | Yes | — | Annual interest rate (e.g. `0.0625` or `6.25%`) | `0.0625` |
-| `io_period_years` | Integer | No | `0` | Duration of Interest-Only period in years (0 to 5) | `2` |
-| `amortization_years` | Integer | Yes | `30` | Full amortization duration (e.g. 25 or 30 years) | `30` |
-| `loan_term_years` | Integer | Yes | `10` | Maturity horizon; triggers balloon balance if $< \text{amort}$ | `10` |
-| `financing_fees_points` | Decimal / % | No | `0.01` | Origination and lender closing points (e.g. `1.0%`) | `0.01` |
-| `has_mezzanine_debt` | Boolean | No | `false` | Enable secondary debt tranche (`true`/`false`) | `false` |
-| `mezzanine_loan_amount` | Decimal | No | `0` | Secondary / Mezzanine principal loan amount ($) | `0.00` |
-| `mezzanine_interest_rate` | Decimal / % | No | `0` | Secondary / Mezzanine interest rate | `0.00` |
+| `senior_loan_type` | String | No | `other_senior` | A senior layer type: `agency_fannie_mae`, `agency_freddie_mac`, `hud_223f`, `hud_221d4`, `bank_credit_union`, `life_company`, `cmbs`, `bridge_debt_fund`, `construction`, `loan_assumption`, `seller_financing` | `agency_fannie_mae` |
+| `loan_amount` | Decimal | Yes | — | Senior loan principal ($) | `18500000.00` |
+| `rate_type` | String | No | `fixed` | `fixed` or `floating` | `fixed` |
+| `interest_rate_pct` | Decimal | Fixed only | — | Annual rate in percent | `6.25` |
+| `index_name` | String | No | `SOFR` | Floating-rate index name | `SOFR` |
+| `index_rate_pct` | Decimal | Floating only | — | Index rate in percent | `4.30` |
+| `spread_bps` | Decimal | Floating only | — | Lender spread in basis points | `275` |
+| `io_months` | Integer | No | `0` | Interest-only months; can't exceed the term | `24` |
+| `amortization_years` | Integer | No | `30` | Amortization after I/O runs over the remaining months | `30` |
+| `term_years` | Integer | No | blank | Maturity; a term inside the hold is repaid as a balloon | `10` |
+| `recourse` | String | No | blank | `recourse` or `non_recourse` | `non_recourse` |
+| `origination_fee_pct` | Decimal | No | `0` | Paid at closing out of equity | `1.0` |
+| `rate_cap_cost` | Decimal | No | `0` | Floating only; paid at closing ($) | `0` |
+| `mezzanine_loan_amount` | Decimal | No | `0` | Adds an interest-only mezzanine layer when > 0 | `0.00` |
+| `mezzanine_interest_rate_pct` | Decimal | No | `0` | Mezzanine rate in percent | `11.0` |
+| `preferred_equity_amount` | Decimal | No | `0` | Adds a preferred equity layer when > 0 | `0.00` |
+| `preferred_return_pct` | Decimal | No | `0` | Annual preferred return in percent | `9.0` |
+
+The earlier template's `loan_structure`, `io_period_years`, `sofr_base_rate_pct` and
+`loan_term_years` columns are still read for backward compatibility.
 
 ---
 
@@ -115,7 +128,7 @@ When an Excel workbook is uploaded via `POST /deals/import/excel`:
 3. **Cross-Field Integrity**:
    - Verifies that `unit_count` in `Property_Details` matches the sum of units in `Unit_Mix`.
    - Rejects files with negative rents, negative unit counts, or interest rates $> 25\%$.
-   - Validates that `io_period_years` does not exceed `amortization_years`.
+   - Validates that `io_months` does not exceed the term, and the capital stack rules in `docs/methodology.md` section 3.
 4. **Error Reporting**:
    - If validation fails, returns HTTP 422 with a structured error payload detailing:
      `{"sheet": "Unit_Mix", "row": 3, "column": "monthly_rent", "error": "Rent must be greater than zero"}`.
