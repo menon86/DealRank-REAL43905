@@ -23,7 +23,7 @@ def rank_deals(payload: RankRequest, db: Session = Depends(get_db)) -> list[Rank
         RankedDealOut(
             deal=entry.deal,
             metrics=MetricsOut.model_validate(entry.metrics),
-            spread=entry.spread,
+            spread=entry.spread if entry.spread.is_finite() else None,
             rank=entry.rank,
         )
         for entry in entries

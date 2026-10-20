@@ -100,12 +100,12 @@ function toNumber(value: unknown): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function parseFields<T extends Record<string, unknown>>(raw: T, fields: (keyof T)[]): T {
-  const parsed = { ...raw };
+function parseFields<T extends object>(raw: T, fields: (keyof T)[]): T {
+  const parsed = { ...raw } as Record<string, unknown>;
   for (const field of fields) {
-    (parsed as Record<string, unknown>)[field as string] = toNumber(raw[field]);
+    parsed[field as string] = toNumber((raw as Record<string, unknown>)[field as string]);
   }
-  return parsed;
+  return parsed as T;
 }
 
 function parseDealOut(raw: DealOut): DealOut {
@@ -129,7 +129,9 @@ function parseRankedDealOut(raw: RankedDealOut): RankedDealOut {
     ...raw,
     deal: parseDealOut(raw.deal),
     metrics: parseMetricsOut(raw.metrics),
-    spread: toNumber(raw.spread) ?? 0,
+    // The API sends null when the deal's IRR didn't converge; -Infinity
+    // keeps it sorting last and lets the views show "n/a".
+    spread: toNumber(raw.spread) ?? Number.NEGATIVE_INFINITY,
   };
 }
 

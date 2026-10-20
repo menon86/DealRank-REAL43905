@@ -40,8 +40,8 @@ Full formulas and rationale live in the project spec (see team docs) and in
 
 | Layer | Status |
 | --- | --- |
-| Calculation engine (`backend/app/engine/`) | Done — 35 tests, golden-case fixtures in [`docs/golden-case-derivation.md`](docs/golden-case-derivation.md) |
-| API (`backend/app/api/`) | Done — deal CRUD, `GET /deals/{id}/metrics`, `POST /rank`, `GET /reports/{pdf,pptx}`, 21 tests |
+| Calculation engine (`backend/app/engine/`) | Done — golden-case fixtures in [`docs/golden-case-derivation.md`](docs/golden-case-derivation.md) |
+| API (`backend/app/api/`) | Done — deal CRUD, `GET /deals/{id}/metrics`, `POST /rank`, `GET /reports/{pdf,pptx}` |
 | Frontend (`frontend/`) | Done — deal form, deal list, comparison table, ranking view, PDF/PPTX download buttons, wired to the real API |
 | Deploy (Render) | Config checked in ([`render.yaml`](render.yaml)); not yet deployed |
 
@@ -76,7 +76,7 @@ API). **Not yet written:** the data provenance memo documenting the spread sourc
 - **Excel Underwriting & Financing Ingestion**: Standardized Excel (`.xlsx`) and CSV import for property underwriting assumptions, unit mix matrices, and financing schedules.
 - **Risk & Ranking Enhancements**: 10-Year Treasury + sub-class cap rate spread hurdles, hard DSCR gate enforcement (~1.20x-1.25x), preference-weighted ranking, and sensitivity sliders.
 
-**Permanently out of scope:** any asset class beyond residential multifamily sub-types, automated OM/PDF OCR scraping, live CoStar/licensed comp data, portfolio-level aggregation, Monte Carlo simulation, development ground-up construction feasibility.
+**Permanently out of scope:** any asset class beyond residential multifamily sub-types, automated OM/PDF OCR scraping, live CoStar/licensed comp data, portfolio-level aggregation, development ground-up construction feasibility.
 
 ## Stack
 

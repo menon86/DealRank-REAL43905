@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fractionToPercentInput, formatPercent, percentInputToFraction } from "../lib/format";
 import type { RankedDealOut } from "../lib/types";
 import { ReportDownloads } from "./ReportDownloads";
@@ -40,14 +40,31 @@ export function RankingView({
   onRetry,
 }: RankingViewProps) {
   const [hurdleInput, setHurdleInput] = useState(fractionToPercentInput(hurdleRate));
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Only resync the text box when the rate changed from outside what the
+  // user is typing, so partial input like "7." or an empty box isn't rewritten.
   useEffect(() => {
-    setHurdleInput(fractionToPercentInput(hurdleRate));
+    setHurdleInput((current) =>
+      current.trim() !== "" && percentInputToFraction(current) === hurdleRate
+        ? current
+        : fractionToPercentInput(hurdleRate),
+    );
   }, [hurdleRate]);
 
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  // Re-rank once typing pauses, and never for a blank/invalid box.
   function commitHurdle(value: string) {
     setHurdleInput(value);
-    onHurdleRateChange(percentInputToFraction(value));
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim() === "" || !Number.isFinite(Number.parseFloat(value))) return;
+    debounceRef.current = setTimeout(() => onHurdleRateChange(percentInputToFraction(value)), 300);
   }
 
   if (selectedDealIds.length === 0) {
@@ -111,11 +128,11 @@ export function RankingView({
             </dd>
           </div>
           <div>
-            <dt>Next (Deliverable 3)</dt>
+            <dt>Risk-adjusted alternative</dt>
             <dd>
-              The flat hurdle becomes a risk-adjusted, sub-class-specific one (10-Year Treasury +
-              cap-rate spread + stabilized NOI growth), and a DSCR gate excludes under-covered deals
-              from ranking entirely.
+              The Risk-adjusted tab replaces this flat hurdle with a sub-class-specific one (10-Year
+              Treasury + cap-rate spread + stabilized NOI growth) and a DSCR gate. The PDF and PPTX
+              exports use the flat hurdle shown here.
             </dd>
           </div>
         </dl>

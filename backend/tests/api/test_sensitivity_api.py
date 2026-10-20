@@ -46,6 +46,17 @@ def test_sweep_validation(client):
         ).status_code
         == 422
     )
+    # Growth at or below -100% (and cap rates above 100%) are meaningless.
+    assert (
+        client.post(
+            url, json={"variable": "rent_growth_rate", "low": "-2", "high": "0"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(url, json={"variable": "exit_cap_rate", "low": "0.05", "high": "2"}).status_code
+        == 422
+    )
     missing = "00000000-0000-0000-0000-000000000000"
     assert (
         client.post(f"/deals/{missing}/sensitivity", json={"variable": "exit_cap_rate"}).status_code
