@@ -91,3 +91,51 @@ def test_pdf_report_survives_markup_characters_in_deal_names(client):
     )
     assert resp.status_code == 200
     assert resp.content.startswith(b"%PDF-")
+
+
+def _pdf_page_texts(pdf: bytes) -> list[str]:
+    """Decoded content stream of each page, in page order. ReportLab writes
+    one ASCII85 + Flate encoded content stream per page, with text drawn as
+    `(string) Tj` operators, so a substring check per page is enough to tell
+    which page a heading or table row landed on."""
+    import base64
+    import re
+    import zlib
+
+    streams = re.findall(
+        rb"/Filter \[ /ASCII85Decode /FlateDecode \].*?stream\r?\n(.*?)~>\s*endstream",
+        pdf,
+        re.S,
+    )
+    return [zlib.decompress(base64.a85decode(s)).decode("latin-1") for s in streams]
+
+
+def test_pdf_keeps_headings_with_tables_and_never_splits_a_table(client):
+    """Five deals is the largest report the UI can ask for. Every heading
+    must share a page with the start of its table, and each table must
+    start and end on the same page."""
+    deal_ids = _seed_two_deals(client) + _seed_two_deals(client)
+    deal_ids.append(client.post("/deals", json=STUDENT_HOUSING_PAYLOAD).json()["id"])
+
+    resp = client.get(
+        "/reports/pdf", params=[("deal_ids", i) for i in deal_ids] + [("hurdle_rate", "0.08")]
+    )
+    assert resp.status_code == 200
+    pages = _pdf_page_texts(resp.content)
+    assert len(pages) >= 2
+
+    def page_of(text: str) -> int:
+        hits = [i for i, page in enumerate(pages) if f"({text})" in page]
+        assert len(hits) == 1, f"{text!r} found on pages {hits}"
+        return hits[0]
+
+    # Comparison: heading, first row and last row on one page.
+    assert page_of("Comparison") == page_of("Hold period") == page_of("Net sale proceeds")
+    # Ranking: heading, header row and every ranked row on one page.
+    assert page_of("Ranking") == page_of("Rank") == page_of("#1") == page_of("#5")
+    # Assumptions heading sits with the first deal's table.
+    assumptions_page = page_of("Assumptions")
+    assert "(Sub-asset class)" in pages[assumptions_page]
+    # Each assumptions table starts and ends on the same page.
+    for page in pages:
+        assert page.count("(Sub-asset class)") == page.count("(Selling costs rate)")
