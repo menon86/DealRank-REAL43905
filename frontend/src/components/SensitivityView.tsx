@@ -30,12 +30,18 @@ function baseIndex(sweep: SweepResponse): number {
 }
 
 function IrrLine({ points, index }: { points: SweepPoint[]; index: number }) {
-  const irrs = points.map((p) => p.unlevered_irr ?? 0);
+  // Non-converging points are skipped, not plotted as 0%.
+  const known = points
+    .map((p, i) => ({ i, v: p.unlevered_irr }))
+    .filter((p): p is { i: number; v: number } => p.v !== null);
+  if (known.length === 0) return null;
+  const irrs = known.map((p) => p.v);
   const lo = Math.min(...irrs);
   const hi = Math.max(...irrs);
   const span = hi - lo || 1;
   const x = (i: number) => 8 + (i / (points.length - 1)) * 304;
   const y = (v: number) => 52 - ((v - lo) / span) * 44;
+  const current = points[index].unlevered_irr;
   return (
     <svg
       viewBox="0 0 320 60"
@@ -47,9 +53,11 @@ function IrrLine({ points, index }: { points: SweepPoint[]; index: number }) {
         fill="none"
         stroke="var(--color-primary)"
         strokeWidth="2"
-        points={irrs.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
+        points={known.map((p) => `${x(p.i)},${y(p.v)}`).join(" ")}
       />
-      <circle cx={x(index)} cy={y(irrs[index])} r="5" fill="var(--color-primary)" />
+      {current !== null && (
+        <circle cx={x(index)} cy={y(current)} r="5" fill="var(--color-primary)" />
+      )}
     </svg>
   );
 }
@@ -174,6 +182,7 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
     let cancelled = false;
     setSweepLoading(true);
     setSweepError(null);
+    setSweeps({});
     setMcResult(null);
     Promise.all(VARIABLES.map((v) => client.sweep(dealId, v.id)))
       .then(([cap, growth]) => {

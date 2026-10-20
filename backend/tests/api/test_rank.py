@@ -69,3 +69,26 @@ def test_rank_response_carries_basis_note(client):
 def test_rank_unknown_deal_id_is_404(client):
     resp = client.post("/rank", json={"deal_ids": [str(uuid.uuid4())], "hurdle_rate": HURDLE_RATE})
     assert resp.status_code == 404
+
+
+def test_rank_non_converging_deal_sorts_last_with_null_spread(client):
+    """A deal whose unlevered IRR doesn't converge must rank last, not 500."""
+    good = client.post("/deals", json=SUBURBAN_GARDEN_PAYLOAD).json()
+    loss_maker = client.post(
+        "/deals", json={**SUBURBAN_GARDEN_PAYLOAD, "name": "Loss", "opex_annual": "9000000.00"}
+    ).json()
+
+    resp = client.post(
+        "/rank", json={"deal_ids": [loss_maker["id"], good["id"]], "hurdle_rate": HURDLE_RATE}
+    )
+    assert resp.status_code == 200
+    ranked = resp.json()
+    assert [e["deal"]["name"] for e in ranked] == [good["name"], "Loss"]
+    assert ranked[1]["spread"] is None
+    assert ranked[1]["metrics"]["unlevered_irr"] is None
+
+
+def test_rank_rejects_out_of_range_hurdle(client):
+    deal = client.post("/deals", json=SUBURBAN_GARDEN_PAYLOAD).json()
+    resp = client.post("/rank", json={"deal_ids": [deal["id"]], "hurdle_rate": "5"})
+    assert resp.status_code == 422

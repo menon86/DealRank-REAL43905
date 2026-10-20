@@ -373,7 +373,7 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
           </div>
           {result.ranked.length === 0 && (
             <div className="empty-state">
-              <p>Every selected deal failed the DSCR gate.</p>
+              <p>Every selected deal was excluded (see below).</p>
             </div>
           )}
           <p className="hurdle-hint">
@@ -383,7 +383,7 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
 
           {result.excluded.length > 0 && (
             <section className="excluded-panel" aria-label="Excluded deals">
-              <h3>Excluded by the DSCR gate ({result.excluded.length})</h3>
+              <h3>Excluded from ranking ({result.excluded.length})</h3>
               <ul>
                 {result.excluded.map((e) => (
                   <li key={e.deal.id}>
