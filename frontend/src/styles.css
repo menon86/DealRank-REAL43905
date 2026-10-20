@@ -1299,6 +1299,7 @@ button.primary:disabled {
   .gate__card {
     transition-duration: 0.01ms;
   }
+}
 
 /* ---- Excel Import Toolbar & Template Download --------------------------- */
 
