@@ -7,13 +7,14 @@
 
 /** 0.0625 -> 6.25, for showing a rate field in an <input>. */
 export function fractionToPercentInput(fraction: number): string {
-  return (fraction * 100).toString();
+  // toFixed strips float noise: 0.07 * 100 is 7.000000000000001 in JS.
+  return Number((fraction * 100).toFixed(6)).toString();
 }
 
 /** "6.25" (whatever the user typed) -> 0.0625, for sending to the client. */
 export function percentInputToFraction(percentInput: string): number {
   const parsed = Number.parseFloat(percentInput);
-  return Number.isFinite(parsed) ? parsed / 100 : 0;
+  return Number.isFinite(parsed) ? Number((parsed / 100).toFixed(8)) : 0;
 }
 
 export function formatPercent(fraction: number | null, digits = 2): string {

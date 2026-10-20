@@ -170,3 +170,14 @@ def test_patch_rejects_out_of_range_value(client):
     created = client.post("/deals", json=STUDENT_HOUSING_PAYLOAD).json()
     resp = client.patch(f"/deals/{created['id']}", json={"exit_cap_rate": "0"})
     assert resp.status_code == 422
+
+
+def test_create_rejects_blank_and_overlong_names(client):
+    from tests.api.payloads import SUBURBAN_GARDEN_PAYLOAD as payload
+
+    assert client.post("/deals", json={**payload, "name": ""}).status_code == 422
+    assert client.post("/deals", json={**payload, "name": "   "}).status_code == 422
+    assert client.post("/deals", json={**payload, "name": "x" * 256}).status_code == 422
+    ok = client.post("/deals", json={**payload, "name": "  Padded  "})
+    assert ok.status_code == 201
+    assert ok.json()["name"] == "Padded"

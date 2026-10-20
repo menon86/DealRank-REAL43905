@@ -6,6 +6,7 @@ file is self-contained (a grader shouldn't need the live app to read it).
 import enum
 import io
 from decimal import Decimal
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -143,7 +144,7 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
     # once there are 4-5 deals on the page.
     rows: list[list] = [
         [Paragraph("Deal", _HEADER_CELL)]
-        + [Paragraph(e.deal.name, _HEADER_CELL_RIGHT) for e in entries]
+        + [Paragraph(escape(e.deal.name), _HEADER_CELL_RIGHT) for e in entries]
     ]
     section_rows: list[int] = []
     bold_rows: list[int] = []
@@ -231,7 +232,7 @@ def _ranking_table(entries: list[RankedEntry]) -> Table:
         rows.append(
             [
                 f"#{entry.rank}",
-                Paragraph(entry.deal.name, _BODY_CELL),
+                Paragraph(escape(entry.deal.name), _BODY_CELL),
                 percent(entry.metrics.unlevered_irr),
                 percent(entry.metrics.levered_irr),
                 spread_str,
@@ -290,7 +291,7 @@ def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
     story.append(Spacer(1, 0.15 * inch))
     for entry in entries:
         deal = entry.deal
-        story.append(Paragraph(deal.name, _H3))
+        story.append(Paragraph(escape(deal.name), _H3))
         assumption_rows = [
             [label, _format_assumption_value(field, getattr(deal, field))]
             for field, label in _ASSUMPTION_FIELDS

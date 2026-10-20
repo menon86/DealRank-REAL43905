@@ -29,6 +29,7 @@ export function App() {
   const [rankError, setRankError] = useState<string | null>(null);
   const [rankReloadKey, setRankReloadKey] = useState(0);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     client
@@ -140,9 +141,20 @@ export function App() {
   }
 
   async function handleDelete(id: string) {
-    await client.deleteDeal(id);
-    setSelectedIds((prev) => prev.filter((x) => x !== id));
-    await refreshDeals();
+    const name = deals.find((d) => d.id === id)?.name ?? "this deal";
+    if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
+    setActionError(null);
+    try {
+      await client.deleteDeal(id);
+      setSelectedIds((prev) => prev.filter((x) => x !== id));
+      if (editingDeal?.id === id) {
+        setShowForm(false);
+        setEditingDeal(null);
+      }
+      await refreshDeals();
+    } catch (err) {
+      setActionError(`Couldn't delete the deal. ${client.describeError(err)}`);
+    }
   }
 
   if (apiError) {
@@ -160,6 +172,14 @@ export function App() {
     <Shell activeTab={activeTab} onTabChange={setActiveTab}>
       {activeTab === "deals" && (
         <>
+          {actionError && (
+            <div className="status-banner error" role="alert">
+              {actionError}
+              <button type="button" className="link" onClick={() => setActionError(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
           <DealList
             deals={deals}
             selectedIds={selectedIds}
@@ -176,6 +196,7 @@ export function App() {
           />
           {showForm && (
             <DealForm
+              key={editingDeal?.id ?? "new"}
               initial={editingDeal}
               onSave={handleSave}
               onCancel={() => {
