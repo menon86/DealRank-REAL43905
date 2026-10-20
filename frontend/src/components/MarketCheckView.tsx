@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { GeographyCombobox } from "./GeographyCombobox";
 import * as client from "../lib/client";
 import { formatMoney, formatPercent } from "../lib/format";
 import type { DealOut, GeographyOut, RentCheckOut, RentCheckStatus } from "../lib/types";
@@ -61,7 +62,10 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
     }
   }
 
-  const uniqueGeographies = Array.from(new Set(geographies.map((g) => g.geography)));
+  const uniqueGeographies = useMemo(
+    () => Array.from(new Set(geographies.map((g) => g.geography))).sort(),
+    [geographies],
+  );
 
   return (
     <div className="card">
@@ -83,8 +87,7 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
           {geographies.length === 0 && (
             <div className="status-banner info" role="status">
               No market rent data is loaded yet. Download a ZORI or Apartment List CSV and load it
-              with <code>python ingest_market_rents.py zillow_zori &lt;file.csv&gt;</code>. You can
-              still type a geography once data exists.
+              with <code>python ingest_market_rents.py zillow_zori &lt;file.csv&gt;</code>.
             </div>
           )}
           <div className="control-grid">
@@ -100,18 +103,12 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
             </div>
             <div className="field">
               <label htmlFor="mc-geo">Geography</label>
-              <input
+              <GeographyCombobox
                 id="mc-geo"
-                list="geo-options"
+                options={uniqueGeographies}
                 value={geography}
-                placeholder="e.g. Indianapolis, IN"
-                onChange={(e) => setGeography(e.target.value)}
+                onChange={setGeography}
               />
-              <datalist id="geo-options">
-                {uniqueGeographies.map((g) => (
-                  <option key={g} value={g} />
-                ))}
-              </datalist>
             </div>
             <div className="field">
               <span className="field-label">&nbsp;</span>
