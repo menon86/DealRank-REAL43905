@@ -22,7 +22,7 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
     <div className="app-shell">
       <div className="app-header">
         <h1>DealRank</h1>
-        <span className="subtitle">Deal comparison &amp; ranking — Deliverable 3</span>
+        <span className="subtitle">Multifamily deal comparison &amp; ranking — Deliverable 3</span>
       </div>
 
       <div className="tab-strip" role="tablist" aria-label="Views">
