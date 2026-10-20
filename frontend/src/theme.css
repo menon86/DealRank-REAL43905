@@ -1,0 +1,594 @@
+/* Visual layer. Loaded after styles.css; changes look only, never behavior.
+   Direction: ink-navy rail, cool paper canvas, flat hairline surfaces,
+   tabular figures, brass reserved for the top-ranked deal. */
+
+:root {
+  --ink: #0c1727;
+  --ink-soft: #16263d;
+  --paper: #eef1f5;
+  --color-bg: var(--paper);
+  --color-surface: #ffffff;
+  --color-border: #dce2ea;
+  --color-text: #101c2e;
+  --color-text-muted: #5a677a;
+  --color-primary: #0b6b63;
+  --color-primary-hover: #08544e;
+  --color-accent-bg: #e6f2f0;
+  --color-positive: #12754f;
+  --color-negative: #b42318;
+  --brass: #b3812a;
+  --brass-bg: #fbf3e2;
+  --radius: 12px;
+  --radius-sm: 7px;
+  --shadow-card: none;
+  --ring: 0 0 0 3px rgba(11, 107, 99, 0.22);
+  font-family:
+    "Instrument Sans",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+body {
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ---- Shell ------------------------------------------------------------- */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  max-width: none;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 24px 14px;
+  background: var(--ink);
+  color: #c9d3e1;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--brass);
+  color: var(--ink);
+}
+
+.brand-mark svg,
+.tab-strip svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brand-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.rail .tab-strip {
+  flex-direction: column;
+  gap: 2px;
+  border: none;
+  margin: 0;
+}
+
+.rail .tab-strip button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  color: #aab6c8;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.rail .tab-strip button:hover {
+  background: var(--ink-soft);
+  color: #fff;
+}
+
+.rail .tab-strip button.active {
+  background: var(--ink-soft);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--brass);
+}
+
+.rail .tab-strip button:focus-visible {
+  outline-color: #fff;
+}
+
+.rail-note {
+  margin: auto 8px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #7e8ca2;
+}
+
+.app-main {
+  min-width: 0;
+  max-width: 1180px;
+  width: 100%;
+  padding: 28px 40px 72px;
+}
+
+.page-title {
+  margin: 0 0 20px;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+/* ---- Surfaces ---------------------------------------------------------- */
+
+.card {
+  padding: 24px 28px;
+  border-radius: var(--radius);
+  border-color: var(--color-border);
+}
+
+.card h2 {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.card h3 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text);
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.card h3:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.card-subtitle {
+  max-width: 68ch;
+  line-height: 1.55;
+}
+
+/* ---- Controls ---------------------------------------------------------- */
+
+.field label,
+.field-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.field input,
+.field select,
+.hurdle-input input {
+  padding: 8px 10px;
+  border: 1px solid #cdd5e0;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: #aab5c5;
+}
+
+.field input:focus,
+.field select:focus,
+.hurdle-input input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--ring);
+}
+
+button.primary {
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  background: var(--color-primary);
+  transition:
+    background 0.15s,
+    transform 0.05s;
+}
+
+button.primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button.secondary,
+a.secondary,
+.import-btn {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  border-color: #cdd5e0;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+button.secondary:hover,
+a.secondary:hover,
+.import-btn:hover {
+  background: var(--color-accent-bg);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+button.link {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.leasing-toggle,
+.segmented {
+  padding: 3px;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
+  background: #e9edf3;
+  border-radius: 10px;
+}
+
+.leasing-toggle button,
+.segmented button {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.leasing-toggle button.active,
+.segmented button.active {
+  background: #fff;
+  color: var(--color-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(12, 23, 39, 0.12);
+}
+
+.badge {
+  background: var(--color-accent-bg);
+  color: var(--color-primary);
+  border-radius: 6px;
+}
+
+/* ---- Messages ---------------------------------------------------------- */
+
+.status-banner {
+  border-radius: 9px;
+  padding: 10px 14px;
+}
+
+.status-banner.error {
+  background: #fdf1ef;
+  border-color: #f2c7c0;
+}
+
+.status-banner.info {
+  background: var(--brass-bg);
+  border-color: #ecd7a6;
+  color: #6a4a0c;
+}
+
+.empty-state {
+  padding: 40px 0;
+  border: 1px dashed #c7d0dd;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+/* ---- Deal list --------------------------------------------------------- */
+
+.deal-list-row {
+  padding: 12px 8px;
+  margin: 0 -8px;
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+
+.deal-list-row:hover {
+  background: #f5f8fb;
+}
+
+.deal-list-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--color-primary);
+}
+
+.deal-list-row .deal-price {
+  font-weight: 600;
+}
+
+/* ---- Tables ------------------------------------------------------------ */
+
+table.data-table th,
+table.data-table td {
+  padding: 10px 12px;
+  border-bottom-color: #e8ecf2;
+}
+
+table.data-table thead th {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+  background: #f6f8fb;
+  border-bottom: 1px solid var(--color-border);
+}
+
+table.data-table thead th:first-child {
+  border-top-left-radius: 8px;
+}
+
+table.data-table thead th:last-child {
+  border-top-right-radius: 8px;
+}
+
+table.data-table tbody tr:hover td,
+table.data-table tbody tr:hover th {
+  background: #f8fafc;
+}
+
+table.data-table tbody tr.section-row td {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: var(--color-primary);
+}
+
+table.ranking-table td.col-ranking-basis {
+  background: var(--color-accent-bg);
+}
+
+table.ranking-table td.rank-cell {
+  font-size: 15px;
+}
+
+table.ranking-table tbody tr.rank-1 td {
+  background: var(--brass-bg);
+}
+
+table.ranking-table tbody tr.rank-1 td.col-ranking-basis {
+  background: #f6e8c6;
+}
+
+table.ranking-table tbody tr.rank-1 td.rank-cell,
+table.ranking-table tbody tr.rank-1 td.deal-cell {
+  color: var(--brass);
+}
+
+table.ranking-table tbody tr.rank-1 td.rank-cell {
+  box-shadow: inset 3px 0 0 var(--brass);
+}
+
+.row-tag {
+  border-radius: 5px;
+}
+
+/* ---- Panels ------------------------------------------------------------ */
+
+.methodology-panel {
+  border: 1px solid #cfe3e0;
+  border-left: 3px solid var(--color-primary);
+  background: #f1f8f7;
+  border-radius: 9px;
+}
+
+.import-toolbar {
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.housing-custom-card,
+.excluded-panel,
+.questionnaire {
+  border-radius: 10px;
+}
+
+.financing-summary-card {
+  background: #f1f8f7;
+  border-color: #cfe3e0;
+  border-radius: 10px;
+}
+
+.financing-stat .stat-label {
+  text-transform: none;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.financing-stat .stat-value {
+  color: var(--color-text);
+  font-size: 17px;
+}
+
+.sens-readout dt {
+  font-size: 12px;
+}
+
+.sens-readout dd {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.rent-result {
+  border-radius: 10px;
+  background: #fafbfd;
+}
+
+.rent-status {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.rent-result.status-caution {
+  border-left-color: var(--brass);
+}
+
+.histogram .bar {
+  border-radius: 2px 2px 0 0;
+}
+
+.combo-list {
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(12, 23, 39, 0.16);
+}
+
+.combo-option {
+  border-radius: 6px;
+}
+
+/* ---- Entry gate: match the app's accent and type ------------------------ */
+
+.gate {
+  --gate-accent: #0b6b63;
+  --gate-accent-hover: #08544e;
+  font-family:
+    "Instrument Sans",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+}
+
+/* ---- Narrow screens: rail becomes a top bar ------------------------------ */
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    overflow-x: auto;
+  }
+
+  .rail .tab-strip {
+    flex-direction: row;
+    width: auto;
+  }
+
+  .rail .tab-strip button {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .rail .tab-strip button.active {
+    box-shadow: inset 0 -3px 0 var(--brass);
+  }
+
+  .rail-note {
+    display: none;
+  }
+
+  .app-main {
+    padding: 20px 16px 56px;
+  }
+
+  .card {
+    padding: 18px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+input[type="range"],
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-primary);
+}
+
+.brand {
+  flex-shrink: 0;
+}
+
+.sync-action-btn {
+  background: var(--color-primary);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.sync-action-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+.badge-asset-class {
+  background: var(--color-accent-bg);
+  color: var(--color-primary);
+  border-radius: 6px;
+}
+
+.housing-custom-card {
+  background: #f8fafc;
+  border-color: var(--color-border);
+}
+
+.unit-mix-table th {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
