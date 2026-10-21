@@ -14,6 +14,7 @@ import { fractionToPercentInput, percentInputToFraction } from "../lib/format";
 import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
 import type { DealCreate, DealOut, LeasingMode, SubAssetClass } from "../lib/types";
 import { CapitalStackEditor } from "./CapitalStackEditor";
+import { NumberInput } from "./NumberInput";
 
 interface UnitMixTier {
   id: string;
@@ -820,26 +821,23 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             <div className="field-grid">
               <div className="field">
                 <label>Surface Parking Stalls</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.surface_parking_stalls}
-                  onChange={(e) => set("surface_parking_stalls", e.target.value)}
+                  onChange={(v) => set("surface_parking_stalls", v)}
                 />
               </div>
               <div className="field">
                 <label>Covered/Garage Stalls</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.covered_parking_stalls}
-                  onChange={(e) => set("covered_parking_stalls", e.target.value)}
+                  onChange={(v) => set("covered_parking_stalls", v)}
                 />
               </div>
               <div className="field">
                 <label>Monthly Parking Fee ($/stall)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.parking_monthly_rate}
-                  onChange={(e) => set("parking_monthly_rate", e.target.value)}
+                  onChange={(v) => set("parking_monthly_rate", v)}
                 />
               </div>
               <div className="field">
@@ -852,26 +850,23 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
               </div>
               <div className="field">
                 <label>Storage Units</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.storage_units}
-                  onChange={(e) => set("storage_units", e.target.value)}
+                  onChange={(v) => set("storage_units", v)}
                 />
               </div>
               <div className="field">
                 <label>Storage Fee ($/mo)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.storage_monthly_fee}
-                  onChange={(e) => set("storage_monthly_fee", e.target.value)}
+                  onChange={(v) => set("storage_monthly_fee", v)}
                 />
               </div>
               <div className="field">
                 <label>Monthly Pet Fee ($/unit)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.pet_monthly_fee}
-                  onChange={(e) => set("pet_monthly_fee", e.target.value)}
+                  onChange={(v) => set("pet_monthly_fee", v)}
                 />
               </div>
               <div className="field">
@@ -903,18 +898,16 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             <div className="field-grid">
               <div className="field">
                 <label>Tech &amp; Wi-Fi Package ($/bed/mo)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.tech_package_monthly_fee}
-                  onChange={(e) => set("tech_package_monthly_fee", e.target.value)}
+                  onChange={(v) => set("tech_package_monthly_fee", v)}
                 />
               </div>
               <div className="field">
                 <label>Furniture Package ($/bed/mo)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.furniture_package_monthly_fee}
-                  onChange={(e) => set("furniture_package_monthly_fee", e.target.value)}
+                  onChange={(v) => set("furniture_package_monthly_fee", v)}
                 />
               </div>
               <div className="field">
@@ -946,34 +939,30 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             <div className="field-grid">
               <div className="field">
                 <label>Structured Garage Stalls</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.garage_parking_stalls}
-                  onChange={(e) => set("garage_parking_stalls", e.target.value)}
+                  onChange={(v) => set("garage_parking_stalls", v)}
                 />
               </div>
               <div className="field">
                 <label>Monthly Garage Rate ($/stall)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.garage_monthly_rate}
-                  onChange={(e) => set("garage_monthly_rate", e.target.value)}
+                  onChange={(v) => set("garage_monthly_rate", v)}
                 />
               </div>
               <div className="field">
                 <label>Ground-Floor Retail Sq Ft</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.commercial_retail_sqft}
-                  onChange={(e) => set("commercial_retail_sqft", e.target.value)}
+                  onChange={(v) => set("commercial_retail_sqft", v)}
                 />
               </div>
               <div className="field">
                 <label>Retail Rent ($/sqft NNN annual)</label>
-                <input
-                  type="number"
+                <NumberInput
                   value={form.commercial_rent_sqft_annual}
-                  onChange={(e) => set("commercial_rent_sqft_annual", e.target.value)}
+                  onChange={(v) => set("commercial_rent_sqft_annual", v)}
                 />
               </div>
             </div>
@@ -1026,10 +1015,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                     <tr key={row.id}>
                       <td style={{ fontWeight: 600 }}>{row.name}</td>
                       <td>
-                        <input
-                          type="number"
+                        <NumberInput
                           value={row.units}
-                          onChange={(e) => updateUnitMixRow(row.id, "units", e.target.value)}
+                          onChange={(v) => updateUnitMixRow(row.id, "units", v)}
                         />
                       </td>
                       <td>
@@ -1040,17 +1028,15 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                         />
                       </td>
                       <td>
-                        <input
-                          type="number"
+                        <NumberInput
                           value={row.avgSqFt}
-                          onChange={(e) => updateUnitMixRow(row.id, "avgSqFt", e.target.value)}
+                          onChange={(v) => updateUnitMixRow(row.id, "avgSqFt", v)}
                         />
                       </td>
                       <td>
-                        <input
-                          type="number"
+                        <NumberInput
                           value={row.rent}
-                          onChange={(e) => updateUnitMixRow(row.id, "rent", e.target.value)}
+                          onChange={(v) => updateUnitMixRow(row.id, "rent", v)}
                         />
                       </td>
                       <td style={{ fontWeight: 600, color: "#1e293b" }}>
@@ -1120,22 +1106,20 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <>
             <div className="field">
               <label htmlFor="unit_count">Unit count</label>
-              <input
+              <NumberInput
                 id="unit_count"
-                type="number"
                 value={form.unit_count}
-                onChange={(e) => set("unit_count", e.target.value)}
+                onChange={(v) => set("unit_count", v)}
                 aria-invalid={!!fieldErrors.unit_count}
               />
               {fieldError("unit_count")}
             </div>
             <div className="field">
               <label htmlFor="monthly_rent_per_unit">Monthly rent / unit ($)</label>
-              <input
+              <NumberInput
                 id="monthly_rent_per_unit"
-                type="number"
                 value={form.monthly_rent_per_unit}
-                onChange={(e) => set("monthly_rent_per_unit", e.target.value)}
+                onChange={(v) => set("monthly_rent_per_unit", v)}
                 aria-invalid={!!fieldErrors.monthly_rent_per_unit}
               />
               {fieldError("monthly_rent_per_unit")}
@@ -1145,22 +1129,20 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <>
             <div className="field">
               <label htmlFor="bed_count">Bed count</label>
-              <input
+              <NumberInput
                 id="bed_count"
-                type="number"
                 value={form.bed_count}
-                onChange={(e) => set("bed_count", e.target.value)}
+                onChange={(v) => set("bed_count", v)}
                 aria-invalid={!!fieldErrors.bed_count}
               />
               {fieldError("bed_count")}
             </div>
             <div className="field">
               <label htmlFor="monthly_rent_per_bed">Monthly rent / bed ($)</label>
-              <input
+              <NumberInput
                 id="monthly_rent_per_bed"
-                type="number"
                 value={form.monthly_rent_per_bed}
-                onChange={(e) => set("monthly_rent_per_bed", e.target.value)}
+                onChange={(v) => set("monthly_rent_per_bed", v)}
                 aria-invalid={!!fieldErrors.monthly_rent_per_bed}
               />
               {fieldError("monthly_rent_per_bed")}
@@ -1181,11 +1163,10 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         </div>
         <div className="field">
           <label htmlFor="other_income_annual">Other income, annual ($)</label>
-          <input
+          <NumberInput
             id="other_income_annual"
-            type="number"
             value={form.other_income_annual}
-            onChange={(e) => set("other_income_annual", e.target.value)}
+            onChange={(v) => set("other_income_annual", v)}
             aria-invalid={!!fieldErrors.other_income_annual}
           />
           {fieldError("other_income_annual")}
@@ -1196,11 +1177,10 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       <div className="field-grid">
         <div className="field">
           <label htmlFor="opex_annual">OpEx, annual ($)</label>
-          <input
+          <NumberInput
             id="opex_annual"
-            type="number"
             value={form.opex_annual}
-            onChange={(e) => set("opex_annual", e.target.value)}
+            onChange={(v) => set("opex_annual", v)}
             aria-invalid={!!fieldErrors.opex_annual}
           />
           {fieldError("opex_annual")}
@@ -1246,11 +1226,10 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <label htmlFor="turnover_cost_per_unit_or_bed">
             Turnover cost / {isPerUnit ? "unit" : "bed"} ($)
           </label>
-          <input
+          <NumberInput
             id="turnover_cost_per_unit_or_bed"
-            type="number"
             value={form.turnover_cost_per_unit_or_bed}
-            onChange={(e) => set("turnover_cost_per_unit_or_bed", e.target.value)}
+            onChange={(v) => set("turnover_cost_per_unit_or_bed", v)}
             aria-invalid={!!fieldErrors.turnover_cost_per_unit_or_bed}
           />
           {fieldError("turnover_cost_per_unit_or_bed")}
@@ -1274,22 +1253,20 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       <div className="field-grid">
         <div className="field">
           <label htmlFor="purchase_price">Purchase price ($)</label>
-          <input
+          <NumberInput
             id="purchase_price"
-            type="number"
             value={form.purchase_price}
-            onChange={(e) => set("purchase_price", e.target.value)}
+            onChange={(v) => set("purchase_price", v)}
             aria-invalid={!!fieldErrors.purchase_price}
           />
           {fieldError("purchase_price")}
         </div>
         <div className="field">
           <label htmlFor="closing_costs">Closing costs ($)</label>
-          <input
+          <NumberInput
             id="closing_costs"
-            type="number"
             value={form.closing_costs}
-            onChange={(e) => set("closing_costs", e.target.value)}
+            onChange={(v) => set("closing_costs", v)}
             aria-invalid={!!fieldErrors.closing_costs}
           />
           {fieldError("closing_costs")}
