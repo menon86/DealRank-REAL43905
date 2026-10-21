@@ -97,6 +97,20 @@ def test_fred_maintenance_page_falls_through_to_treasury_gov(monkeypatch):
     assert (quote.source, quote.yield_) == ("treasury", D("0.0512"))
 
 
+def test_empty_current_month_uses_previous_month(monkeypatch):
+    empty = "<feed xmlns='http://www.w3.org/2005/Atom'/>"
+    calls = _mock_get(
+        monkeypatch,
+        lambda url: httpx.Response(
+            200,
+            text=TREASURY_XML if len(calls) == 3 else empty if "fred" not in url else "<html/>",
+            request=httpx.Request("GET", url),
+        ),
+    )
+    quote = treasury.get_treasury_10y()
+    assert quote.source == "treasury" and len(calls) == 3
+
+
 def test_http_error_status_also_falls_back(monkeypatch):
     _mock_get(monkeypatch, lambda url: httpx.Response(503, request=httpx.Request("GET", url)))
     assert treasury.get_treasury_10y().source == "fallback"
