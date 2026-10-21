@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import httpx
@@ -23,6 +24,8 @@ import httpx
 from app.config import get_settings
 
 CACHE_TTL_SECONDS = 6 * 60 * 60
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -77,14 +80,17 @@ def get_treasury_10y(*, use_cache: bool = True) -> TreasuryQuote:
     if use_cache and _cache is not None and now - _cache[0] < CACHE_TTL_SECONDS:
         return _cache[1]
     settings = get_settings()
-    sources = (
-        (settings.FRED_SERIES_URL, parse_fred_csv),
-        (settings.TREASURY_YIELD_CURVE_URL.format(year=date.today().year), parse_treasury_xml),
-    )
+    today = date.today()
+    # Previous month too: the current month's feed is empty on the first days of a month.
+    prior = (today.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
+    sources = [(settings.FRED_SERIES_URL, parse_fred_csv)]
+    for month in (today.strftime("%Y%m"), prior):
+        sources.append((settings.TREASURY_YIELD_CURVE_URL.format(month=month), parse_treasury_xml))
     for url, parse in sources:
         try:
             quote = _fetch(url, parse)
-        except (httpx.HTTPError, ValueError, ArithmeticError, ET.ParseError):
+        except (httpx.HTTPError, ValueError, ArithmeticError, ET.ParseError) as exc:
+            logger.warning("Treasury yield lookup failed for %s: %r", url, exc)
             continue
         _cache = (now, quote)
         return quote
