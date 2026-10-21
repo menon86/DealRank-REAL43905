@@ -189,6 +189,7 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
     row("Exit value", lambda e: money(e.metrics.exit_value), bold=True)
     row("Less: selling costs", lambda e: money(e.metrics.selling_costs))
     row("Less: debt balance at exit", lambda e: money(e.metrics.loan_balance_at_exit))
+    row("Less: prepayment penalties", lambda e: money(e.metrics.prepayment_penalties))
     row("Less: preferred equity repaid", lambda e: money(e.metrics.preferred_equity_repayment))
     row("Net sale proceeds", lambda e: money(e.metrics.net_sale_proceeds), bold=True)
 

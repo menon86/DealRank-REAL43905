@@ -37,6 +37,10 @@ const ROWS: ProjectionRow[] = [
     kind: "deduction",
   },
   {
+    label: "of which mortgage insurance",
+    value: (cf) => formatMoney(cf.mortgage_insurance),
+  },
+  {
     label: "Preferred return",
     value: (cf) => formatMoney(cf.preferred_distribution),
     kind: "deduction",

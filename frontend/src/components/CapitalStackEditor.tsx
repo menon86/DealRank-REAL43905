@@ -1,6 +1,8 @@
 import {
   GROUP_LABELS,
   LAYER_OPTIONS,
+  PREPAYMENT_LABELS,
+  allowsMortgageInsurance,
   blankLayer,
   isDebtType,
   isOtherType,
@@ -8,12 +10,15 @@ import {
   layerDisplayName,
   layerGroup,
   layerOption,
+  typeDefaults,
+  upfrontCost,
+  withDefaultTreasury,
   yearOneDebtService,
 } from "../lib/capitalStack";
 import type { LayerForm } from "../lib/capitalStack";
 import { formatMoney } from "../lib/format";
 import { NumberInput } from "./NumberInput";
-import type { LayerGroup, LayerType } from "../lib/types";
+import type { LayerGroup, LayerType, PrepaymentType } from "../lib/types";
 
 interface CapitalStackEditorProps {
   layers: LayerForm[];
@@ -21,6 +26,11 @@ interface CapitalStackEditorProps {
   /** Purchase price + closing costs: the base for "% of total cost". */
   totalCost: number;
   errors: string[];
+  /**
+   * Market 10-Year Treasury in percent ("" if unknown), pre-filled as the
+   * Treasury rate on yield maintenance and defeasance layers.
+   */
+  defaultTreasuryPct: string;
 }
 
 const GROUP_ORDER: LayerGroup[] = ["senior", "subordinate", "equity"];
@@ -39,29 +49,46 @@ export function CapitalStackEditor({
   onChange,
   totalCost,
   errors,
+  defaultTreasuryPct,
 }: CapitalStackEditorProps) {
-  function update(key: string, patch: Partial<LayerForm>) {
-    onChange(layers.map((layer) => (layer.key === key ? { ...layer, ...patch } : layer)));
+  /**
+   * fillTreasury: pre-fill a blank Treasury rate — only when the loan or
+   * prepayment type changes, never while the user is editing the rate.
+   */
+  function update(key: string, patch: Partial<LayerForm>, fillTreasury = false) {
+    const next = layers.map((layer) => (layer.key === key ? { ...layer, ...patch } : layer));
+    onChange(fillTreasury ? withDefaultTreasury(next, defaultTreasuryPct) : next);
   }
 
   function changeType(layer: LayerForm, type: LayerType) {
-    // Keep what the user typed, but reset the defaults that depend on type.
+    // Keep what the user typed, but reset the defaults that depend on type:
+    // prepayment terms, mortgage insurance, and HUD's longer amortization.
     const fresh = blankLayer(type);
-    update(layer.key, {
-      type,
-      rate_type: isDebtType(type) ? layer.rate_type : "fixed",
-      amortization_years: isDebtType(layer.type)
-        ? layer.amortization_years
-        : fresh.amortization_years,
-      expanded: fresh.expanded,
-    });
+    const defaults = typeDefaults(type);
+    update(
+      layer.key,
+      {
+        type,
+        rate_type: isDebtType(type) ? layer.rate_type : "fixed",
+        amortization_years:
+          defaults.amortization_years ??
+          (isDebtType(layer.type) ? layer.amortization_years : fresh.amortization_years),
+        term_years: defaults.term_years ?? layer.term_years,
+        prepayment_type: fresh.prepayment_type,
+        prepayment_schedule: fresh.prepayment_schedule,
+        mip_annual_pct: fresh.mip_annual_pct,
+        mip_upfront_pct: fresh.mip_upfront_pct,
+        expanded: fresh.expanded,
+      },
+      true,
+    );
   }
 
   function addLayer() {
     const hasSenior = layers.some((l) => layerGroup(l.type) === "senior");
     const allCash = layers.some((l) => l.type === "all_cash");
     const type: LayerType = !hasSenior && !allCash ? "agency_fannie_mae" : "sponsor_gp";
-    onChange([...layers, blankLayer(type)]);
+    onChange(withDefaultTreasury([...layers, blankLayer(type)], defaultTreasuryPct));
   }
 
   function remove(key: string) {
@@ -74,12 +101,7 @@ export function CapitalStackEditor({
   const preferred = layers
     .filter((l) => l.type === "preferred_equity")
     .reduce((sum, l) => sum + layerAmount(l, totalCost), 0);
-  const upfront = layers.reduce((sum, l) => {
-    if (layerGroup(l.type) === "equity") return sum;
-    const fee = ((Number(l.origination_fee_pct) || 0) / 100) * layerAmount(l, totalCost);
-    const cap = isDebtType(l.type) && l.rate_type === "floating" ? Number(l.rate_cap_cost) || 0 : 0;
-    return sum + fee + cap;
-  }, 0);
+  const upfront = layers.reduce((sum, l) => sum + upfrontCost(l, totalCost), 0);
   const commonEquity = totalCost + upfront - totalDebt - preferred;
   const yearOneService = debtLayers.reduce((sum, l) => sum + yearOneDebtService(l, totalCost), 0);
   const seniorService = debtLayers
@@ -115,6 +137,9 @@ export function CapitalStackEditor({
               totalCost={totalCost}
               onUpdate={(patch) => update(layer.key, patch)}
               onTypeChange={(type) => changeType(layer, type)}
+              onPrepaymentChange={(prepayment) =>
+                update(layer.key, { prepayment_type: prepayment }, true)
+              }
               onRemove={() => remove(layer.key)}
             />
           ))}
@@ -201,10 +226,19 @@ interface LayerRowProps {
   totalCost: number;
   onUpdate: (patch: Partial<LayerForm>) => void;
   onTypeChange: (type: LayerType) => void;
+  onPrepaymentChange: (prepayment: PrepaymentType) => void;
   onRemove: () => void;
 }
 
-function LayerRow({ index, layer, totalCost, onUpdate, onTypeChange, onRemove }: LayerRowProps) {
+function LayerRow({
+  index,
+  layer,
+  totalCost,
+  onUpdate,
+  onTypeChange,
+  onPrepaymentChange,
+  onRemove,
+}: LayerRowProps) {
   const group = layerGroup(layer.type);
   const debt = isDebtType(layer.type);
   const preferred = layer.type === "preferred_equity";
@@ -457,6 +491,83 @@ function LayerRow({ index, layer, totalCost, onUpdate, onTypeChange, onRemove }:
               onChange={(e) => onUpdate({ origination_fee_pct: e.target.value })}
             />
           </div>
+          {debt && allowsMortgageInsurance(layer.type) && (
+            <>
+              <div className="field">
+                <label htmlFor={id("mip_annual")}>Mortgage insurance, annual (%)</label>
+                <input
+                  id={id("mip_annual")}
+                  type="number"
+                  step="0.05"
+                  value={layer.mip_annual_pct}
+                  onChange={(e) => onUpdate({ mip_annual_pct: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor={id("mip_upfront")}>Mortgage insurance, upfront (%)</label>
+                <input
+                  id={id("mip_upfront")}
+                  type="number"
+                  step="0.05"
+                  value={layer.mip_upfront_pct}
+                  onChange={(e) => onUpdate({ mip_upfront_pct: e.target.value })}
+                />
+              </div>
+            </>
+          )}
+          {debt && (
+            <div className="field">
+              <label htmlFor={id("prepay")}>Prepayment at sale</label>
+              <select
+                id={id("prepay")}
+                value={layer.prepayment_type}
+                onChange={(e) => onPrepaymentChange(e.target.value as PrepaymentType)}
+              >
+                {(Object.keys(PREPAYMENT_LABELS) as PrepaymentType[]).map((value) => (
+                  <option key={value} value={value}>
+                    {PREPAYMENT_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {debt && layer.prepayment_type === "step_down" && (
+            <div className="field">
+              <label htmlFor={id("prepay_schedule")}>Step-down by loan year (%)</label>
+              <input
+                id={id("prepay_schedule")}
+                value={layer.prepayment_schedule}
+                placeholder="e.g. 5, 4, 3, 2, 1"
+                onChange={(e) => onUpdate({ prepayment_schedule: e.target.value })}
+              />
+            </div>
+          )}
+          {debt &&
+            (layer.prepayment_type === "yield_maintenance" ||
+              layer.prepayment_type === "defeasance") && (
+              <div className="field">
+                <label htmlFor={id("prepay_treasury")}>Treasury rate at sale (%)</label>
+                <input
+                  id={id("prepay_treasury")}
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g. 4.25"
+                  value={layer.prepayment_treasury_pct}
+                  onChange={(e) => onUpdate({ prepayment_treasury_pct: e.target.value })}
+                />
+              </div>
+            )}
+          {debt && layer.prepayment_type !== "none" && (
+            <p className="field-hint stack-terms-hint">
+              {layer.prepayment_type === "step_down" &&
+                "Charged on the balance repaid at the sale, at the rate for the loan year the sale falls in (0% once the schedule runs out)."}
+              {layer.prepayment_type === "yield_maintenance" &&
+                "The present value of the interest the lender loses (note rate − Treasury) from the sale to maturity, at least 1% of the balance."}
+              {layer.prepayment_type === "defeasance" &&
+                "The cost of Treasuries that replace every remaining payment to maturity, less the balance repaid."}{" "}
+              Comes out of the sale proceeds; no penalty if the loan matures by the exit.
+            </p>
+          )}
           {debt && layer.term_years !== "" && (
             <p className="field-hint stack-terms-hint">
               A term shorter than the hold is repaid as a balloon at maturity, out of that

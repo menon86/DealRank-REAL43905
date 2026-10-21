@@ -16,7 +16,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.engine.types import DealInputs, FinancingLayer, LayerGroup, LayerType, RateType
+from app.engine.types import (
+    MORTGAGE_INSURANCE_TYPES,
+    DealInputs,
+    FinancingLayer,
+    LayerGroup,
+    LayerType,
+    PrepaymentType,
+    RateType,
+)
 
 MONTHS_PER_YEAR = 12
 
@@ -128,6 +136,18 @@ def validate_capital_stack(layers: tuple[FinancingLayer, ...] | list[FinancingLa
         if layer.amount < 0:
             errors.append(f"{prefix}: amount can't be negative.")
 
+        if not layer.is_debt and layer.prepayment_type is not PrepaymentType.NONE:
+            errors.append(f"{prefix}: only debt layers can have a prepayment penalty.")
+        if (layer.mip_annual_rate or layer.mip_upfront_rate) and (
+            layer.layer_type not in MORTGAGE_INSURANCE_TYPES
+        ):
+            errors.append(
+                f"{prefix}: mortgage insurance applies only to HUD/FHA loans "
+                "(or an assumed HUD loan)."
+            )
+        if layer.mip_annual_rate < 0 or layer.mip_upfront_rate < 0:
+            errors.append(f"{prefix}: mortgage insurance can't be negative.")
+
         if layer.is_preferred_equity:
             if layer.amount <= 0:
                 errors.append(f"{prefix}: preferred equity needs an amount above zero.")
@@ -155,5 +175,21 @@ def validate_capital_stack(layers: tuple[FinancingLayer, ...] | list[FinancingLa
             errors.append(
                 f"{prefix}: the amortization period must be longer than the interest-only period."
             )
+
+        if layer.prepayment_type is PrepaymentType.STEP_DOWN:
+            if not layer.prepayment_schedule:
+                errors.append(
+                    f"{prefix}: a step-down prepayment needs a schedule (e.g. 5-4-3-2-1)."
+                )
+            elif any(not 0 <= rate <= 1 for rate in layer.prepayment_schedule):
+                errors.append(f"{prefix}: step-down percentages must be between 0 and 100%.")
+        elif layer.prepayment_type in (
+            PrepaymentType.YIELD_MAINTENANCE,
+            PrepaymentType.DEFEASANCE,
+        ):
+            if layer.term_years is None:
+                errors.append(f"{prefix}: yield maintenance and defeasance need a term / maturity.")
+            if layer.prepayment_treasury_rate is None:
+                errors.append(f"{prefix}: yield maintenance and defeasance need a Treasury rate.")
 
     return errors

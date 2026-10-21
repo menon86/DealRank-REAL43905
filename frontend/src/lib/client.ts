@@ -86,6 +86,7 @@ const CASH_FLOW_DECIMAL_FIELDS: (keyof AnnualCashFlowOut)[] = [
   "credit_loss",
   "management_fee",
   "replacement_reserves",
+  "mortgage_insurance",
 ];
 
 const LAYER_DECIMAL_FIELDS: (keyof CapitalStackLayer)[] = [
@@ -96,6 +97,9 @@ const LAYER_DECIMAL_FIELDS: (keyof CapitalStackLayer)[] = [
   "rate_cap_cost",
   "origination_fee_rate",
   "preferred_return",
+  "prepayment_treasury_rate",
+  "mip_annual_rate",
+  "mip_upfront_rate",
 ];
 
 const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
@@ -118,6 +122,7 @@ const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
   "preferred_equity",
   "upfront_financing_costs",
   "preferred_equity_repayment",
+  "prepayment_penalties",
   "unlevered_irr_before_costs",
   "min_dscr",
   "debt_yield",
@@ -145,7 +150,10 @@ function parseDealOut(raw: DealOut): DealOut {
   return {
     ...parsed,
     capital_stack: raw.capital_stack
-      ? raw.capital_stack.map((layer) => parseFields(layer, LAYER_DECIMAL_FIELDS))
+      ? raw.capital_stack.map((layer) => ({
+          ...parseFields(layer, LAYER_DECIMAL_FIELDS),
+          prepayment_schedule: (layer.prepayment_schedule ?? []).map((r) => toNumber(r) ?? 0),
+        }))
       : null,
     unit_mix: raw.unit_mix
       ? raw.unit_mix.map((tier) => ({ ...tier, rent: toNumber(tier.rent) ?? 0 }))

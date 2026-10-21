@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LAYER_OPTIONS,
   blankLayer,
@@ -7,9 +7,10 @@ import {
   layerAmount,
   layerGroup,
   validateLayers,
+  withDefaultTreasury,
 } from "../lib/capitalStack";
 import type { LayerForm } from "../lib/capitalStack";
-import { describeError } from "../lib/client";
+import { describeError, getHurdles } from "../lib/client";
 import { fractionToPercentInput, percentInputToFraction } from "../lib/format";
 import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
 import type { DealCreate, DealOut, LeasingMode, SubAssetClass } from "../lib/types";
@@ -414,6 +415,27 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   const [importNotice, setImportNotice] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [layers, setLayers] = useState<LayerForm[]>(() => initialLayers(initial, defaultLayers));
   const [stackErrors, setStackErrors] = useState<string[]>([]);
+  // The 10-Year Treasury (live, or the configured fallback) pre-fills the
+  // Treasury rate on yield maintenance / defeasance layers. If it can't be
+  // fetched the user just types one in.
+  const [treasuryPct, setTreasuryPct] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getHurdles()
+      .then((table) => {
+        if (cancelled) return;
+        const pct = String(Number((table.treasury.yield * 100).toFixed(2)));
+        setTreasuryPct(pct);
+        setLayers((prev) => withDefaultTreasury(prev, pct));
+      })
+      .catch(() => {
+        /* no market rate available; the field stays for the user to fill */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function updateLayers(next: LayerForm[]) {
     setLayers(next);
@@ -705,7 +727,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         const text = e.target?.result as string;
         const { data } = parseCsvText(text);
         if (Object.keys(data).length === 0) throw new Error("no recognizable rows");
-        updateLayers(layersFromFinancingCsv(data, layers));
+        updateLayers(withDefaultTreasury(layersFromFinancingCsv(data, layers), treasuryPct));
 
         setImportNotice({
           message: `Successfully imported financing details from "${file.name}"!`,
@@ -1425,6 +1447,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         onChange={updateLayers}
         totalCost={totalCost}
         errors={stackErrors}
+        defaultTreasuryPct={treasuryPct}
       />
 
       {/* Hold & Exit */}
