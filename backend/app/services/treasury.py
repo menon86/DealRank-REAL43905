@@ -29,7 +29,12 @@ class TreasuryQuote:
     source: str  # "fred" | "fallback" | "override"
 
 
+# A failed lookup is remembered briefly so an outage costs one 5-second
+# timeout per minute, not one per request.
+FAILURE_BACKOFF_SECONDS = 60
+
 _cache: tuple[float, TreasuryQuote] | None = None
+_last_failure: float | None = None
 
 
 def parse_fred_csv(text: str) -> TreasuryQuote:
@@ -47,17 +52,22 @@ def parse_fred_csv(text: str) -> TreasuryQuote:
 
 
 def get_treasury_10y(*, use_cache: bool = True) -> TreasuryQuote:
-    global _cache
+    global _cache, _last_failure
     now = time.monotonic()
     if use_cache and _cache is not None and now - _cache[0] < CACHE_TTL_SECONDS:
         return _cache[1]
     settings = get_settings()
+    fallback = TreasuryQuote(yield_=settings.TREASURY_10Y_FALLBACK, as_of=None, source="fallback")
+    if use_cache and _last_failure is not None and now - _last_failure < FAILURE_BACKOFF_SECONDS:
+        return fallback
     try:
         resp = httpx.get(settings.FRED_SERIES_URL, timeout=5.0, follow_redirects=True)
         resp.raise_for_status()
         quote = parse_fred_csv(resp.text)
     except (httpx.HTTPError, ValueError, ArithmeticError):
-        return TreasuryQuote(yield_=settings.TREASURY_10Y_FALLBACK, as_of=None, source="fallback")
+        _last_failure = now
+        return fallback
+    _last_failure = None
     _cache = (now, quote)
     return quote
 
@@ -67,5 +77,6 @@ def override_quote(yield_: Decimal) -> TreasuryQuote:
 
 
 def clear_cache() -> None:
-    global _cache
+    global _cache, _last_failure
     _cache = None
+    _last_failure = None

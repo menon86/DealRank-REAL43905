@@ -72,9 +72,11 @@ def test_each_deal_uses_its_own_subclass_hurdle(client, deal_ids):
     urban = by_name["Meridian Urban Mid-Rise"]
     assert Decimal(urban["hurdle"]["total"]) == Decimal("0.0660")
 
-    # spread = unlevered IRR - that deal's hurdle
+    # spread = unlevered IRR before closing/selling costs - that deal's hurdle
     for r in body["ranked"]:
-        expected = Decimal(r["metrics"]["unlevered_irr"]) - Decimal(r["hurdle"]["total"])
+        expected = Decimal(r["metrics"]["unlevered_irr_before_costs"]) - Decimal(
+            r["hurdle"]["total"]
+        )
         assert Decimal(r["spread"]) == expected
 
     assert body["treasury"]["source"] == "override"
@@ -119,9 +121,9 @@ def test_default_is_return_only_weights(client, deal_ids):
 
 
 def test_preference_weights_flip_the_order_on_a_real_tradeoff(client, spreads):
-    # Same asset, same unlevered IRR, different leverage. With cheap (3%) debt that is
-    # positive leverage, so the low-leverage twin has higher DSCR but lower cash-on-cash.
-    # Return can't separate them; the other two factors pull in opposite directions.
+    # Same asset, same unlevered IRR, different leverage. The return and cash-flow
+    # factors are unlevered, so financing can only move the order through the risk
+    # factor: with a risk weight the low-leverage twin wins, without one they tie.
     cheap = {**SUBURBAN_GARDEN_PAYLOAD, "interest_rate": "0.03"}
     levered = client.post("/deals", json=cheap).json()["id"]
     twin = {**cheap, "name": "Willowbrook Low-Leverage", "loan_amount": "9000000"}
@@ -131,7 +133,8 @@ def test_preference_weights_flip_the_order_on_a_real_tradeoff(client, spreads):
         body = _rank(client, [levered, safe], weights=weights)
         return body["ranked"][0]["deal"]["name"]
 
-    assert top({"irr": 0, "cash_flow": 1, "risk": 0}) == "Willowbrook Suburban Garden"
+    flat = _rank(client, [levered, safe], weights={"irr": 0, "cash_flow": 1, "risk": 0})
+    assert flat["ranked"][0]["score"] == flat["ranked"][1]["score"]
     assert top({"irr": 0, "cash_flow": 0, "risk": 1}) == "Willowbrook Low-Leverage"
 
 
@@ -224,3 +227,87 @@ def test_hurdle_reference_table(client, spreads, monkeypatch):
     assert Decimal(body["hurdles"][0]["total"]) == Decimal("0.0431") + Decimal("0.013") + Decimal(
         "0.02"
     )
+
+
+# ------------------------------------------------- audit fixes
+
+
+def test_duplicate_deal_ids_are_ranked_once(client, deal_ids):
+    body = _rank(client, [deal_ids[1], deal_ids[1], deal_ids[0]], dscr_minimum="0")
+    assert len(body["ranked"]) == 2
+    flat = client.post("/rank", json={"deal_ids": [deal_ids[1]] * 2, "hurdle_rate": "0.08"})
+    assert len(flat.json()) == 1
+
+
+def test_leverage_counts_every_debt_layer(client, spreads):
+    stack = [
+        {
+            "type": "agency_fannie_mae",
+            "amount": "14400000",
+            "interest_rate": "0.06",
+            "amortization_years": 30,
+        },
+        {"type": "mezzanine", "amount": "7200000", "interest_rate": "0.11"},
+        {"type": "sponsor_gp", "amount": "1"},
+    ]
+    stacked = client.post("/deals", json={**SUBURBAN_GARDEN_PAYLOAD, "capital_stack": stack}).json()
+    body = _rank(client, [stacked["id"]], dscr_minimum="0")
+    ltv = Decimal(body["ranked"][0]["ltv"])
+    assert ltv == Decimal("21600000") / Decimal(SUBURBAN_GARDEN_PAYLOAD["purchase_price"])
+
+
+def test_gate_uses_lowest_dscr_over_the_hold(client, spreads):
+    # Interest-only for 3 years: year-one DSCR looks fine, but it drops once the loan amortizes.
+    stack = [
+        {
+            "type": "agency_fannie_mae",
+            "amount": "18700000",
+            "interest_rate": "0.06",
+            "amortization_years": 25,
+            "io_months": 36,
+        },
+        {"type": "sponsor_gp", "amount": "1"},
+    ]
+    deal = client.post("/deals", json={**SUBURBAN_GARDEN_PAYLOAD, "capital_stack": stack}).json()
+    metrics = client.get(f"/deals/{deal['id']}/metrics").json()
+    year_one = Decimal(metrics["year_one_dscr"])
+    lowest = Decimal(metrics["min_dscr"])
+    assert lowest < year_one
+    minimum = str((year_one + lowest) / 2)  # passes year one, fails later
+    body = _rank(client, [deal["id"]], dscr_minimum=minimum)
+    assert body["ranked"] == []
+    assert "over the hold" in body["excluded"][0]["reason"]
+
+
+def test_debt_yield_gate_is_optional_and_excludes(client, deal_ids):
+    off = _rank(client, deal_ids, dscr_minimum="0")
+    assert len(off["ranked"]) == 3
+    strict = _rank(client, deal_ids, dscr_minimum="0", debt_yield_minimum="0.5")
+    assert strict["ranked"] == []
+    assert all("Debt yield" in e["reason"] for e in strict["excluded"])
+
+
+def test_exit_cap_below_going_in_cap_is_flagged(client, spreads):
+    aggressive = {**SUBURBAN_GARDEN_PAYLOAD, "exit_cap_rate": "0.04"}
+    sane = {**SUBURBAN_GARDEN_PAYLOAD, "name": "Sane exit", "exit_cap_rate": "0.09"}
+    ids = [client.post("/deals", json=p).json()["id"] for p in (aggressive, sane)]
+    body = _rank(client, ids, dscr_minimum="0")
+    by_name = {r["deal"]["name"]: r for r in body["ranked"]}
+    assert any("compression" in w for w in by_name["Willowbrook Suburban Garden"]["warnings"])
+    assert not any("compression" in w for w in by_name["Sane exit"]["warnings"])
+
+
+def test_rent_growth_far_above_the_hurdle_growth_is_flagged(client, spreads):
+    hot = client.post("/deals", json={**SUBURBAN_GARDEN_PAYLOAD, "rent_growth_rate": "0.06"}).json()
+    body = _rank(client, [hot["id"]], dscr_minimum="0")
+    assert any("Rent growth" in w for w in body["ranked"][0]["warnings"])
+
+
+def test_adding_a_deal_does_not_change_existing_scores(client, deal_ids):
+    weights = {"irr": 1, "cash_flow": 1, "risk": 1}
+    pair = _rank(client, deal_ids[:2], dscr_minimum="0", weights=weights)
+    trio = _rank(client, deal_ids, dscr_minimum="0", weights=weights)
+    pair_scores = {r["deal"]["name"]: Decimal(r["score"]) for r in pair["ranked"]}
+    trio_scores = {r["deal"]["name"]: Decimal(r["score"]) for r in trio["ranked"]}
+    for name, score in pair_scores.items():
+        assert trio_scores[name] == score

@@ -410,6 +410,17 @@ export function validateLayers(layers: LayerForm[], totalCost: number): string[]
       errors.push(`${name}: the amortization period must be longer than the interest-only period.`);
     }
   });
+
+  // Debt and preferred equity can't cover (nearly) the whole cost: the
+  // backend requires common equity of at least 5% of total cost.
+  if (totalCost > 0) {
+    const financed = layers
+      .filter((l) => isDebtType(l.type) || l.type === "preferred_equity")
+      .reduce((sum, l) => sum + Math.max(0, layerAmount(l, totalCost)), 0);
+    if (financed > totalCost * 0.95) {
+      errors.push("Debt and preferred equity must leave at least 5% of total cost as common equity.");
+    }
+  }
   return errors;
 }
 

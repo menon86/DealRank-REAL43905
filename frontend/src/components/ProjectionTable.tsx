@@ -16,6 +16,7 @@ interface ProjectionRow {
 const ROWS: ProjectionRow[] = [
   { label: "Gross potential rent", value: (cf) => formatMoney(cf.gpr) },
   { label: "Vacancy loss", value: (cf) => formatMoney(cf.vacancy_loss), kind: "deduction" },
+  { label: "Bad debt & concessions", value: (cf) => formatMoney(cf.credit_loss), kind: "deduction" },
   { label: "Effective gross income", value: (cf) => formatMoney(cf.egi), kind: "subtotal" },
   { label: "Operating expenses", value: (cf) => formatMoney(cf.opex), kind: "deduction" },
   {
@@ -23,7 +24,13 @@ const ROWS: ProjectionRow[] = [
     value: (cf) => formatMoney(cf.turnover_expense),
     kind: "deduction",
   },
+  { label: "Management fee", value: (cf) => formatMoney(cf.management_fee), kind: "deduction" },
   { label: "NOI", value: (cf) => formatMoney(cf.noi), kind: "subtotal" },
+  {
+    label: "Replacement reserves",
+    value: (cf) => formatMoney(cf.replacement_reserves),
+    kind: "deduction",
+  },
   {
     label: "Debt service (all debt)",
     value: (cf) => formatMoney(cf.debt_service),
@@ -33,6 +40,10 @@ const ROWS: ProjectionRow[] = [
     label: "Preferred return",
     value: (cf) => formatMoney(cf.preferred_distribution),
     kind: "deduction",
+  },
+  {
+    label: "Preferred return unpaid (accrued)",
+    value: (cf) => formatMoney(cf.preferred_accrued),
   },
   {
     label: "Balloon repayment",

@@ -6,6 +6,7 @@ sensitivity case can never disagree with the headline numbers.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -77,12 +78,19 @@ def sweep(
 class MonteCarloSpec:
     """Standard deviations of independent normal draws centred on the
     deal's own inputs. Draws are clamped to sane ranges (exit cap >= 1%,
-    rent growth within +/-20%, vacancy within 0-50%).
+    rent growth within +/-20%, vacancy within 0-50%). Each draw applies to
+    the whole hold: this models uncertainty about the assumptions, not
+    year-to-year volatility, and interest rates and expense growth are not
+    varied.
     """
 
     exit_cap_sd: Decimal = Decimal("0.0050")
     rent_growth_sd: Decimal = Decimal("0.0100")
     vacancy_sd: Decimal = Decimal("0.0200")
+    # Correlation between the exit cap and rent growth draws. Negative: weak
+    # rent markets tend to come with wider (higher) exit caps, so the bad
+    # outcomes arrive together.
+    exit_cap_rent_growth_correlation: Decimal = Decimal("-0.3")
     simulations: int = 1000
     seed: int | None = None
 
@@ -124,6 +132,13 @@ def _draw(rng: random.Random, centre: Decimal, sd: Decimal) -> Decimal:
     if sd == 0:
         return centre
     return centre + Decimal(rng.gauss(0.0, float(sd))).quantize(RATE_QUANTUM)
+
+
+def _shock(centre: Decimal, sd: Decimal, z: float) -> Decimal:
+    """centre + sd * z for a standard normal draw z."""
+    if sd == 0:
+        return centre
+    return centre + (sd * Decimal(z)).quantize(RATE_QUANTUM)
 
 
 def _percentile(sorted_values: list[Decimal], q: Decimal) -> Decimal:
@@ -175,12 +190,19 @@ def monte_carlo(
     spec: MonteCarloSpec,
     hurdle: Decimal | None = None,
     dscr_minimum: Decimal | None = None,
+    hurdle_on_gross_irr: bool = False,
 ) -> MonteCarloResult:
     """Draws exit cap rate, rent growth and vacancy independently, re-runs
     the full waterfall each time, and summarizes unlevered/levered IRR.
     Pass `hurdle` for P(unlevered IRR < hurdle) and `dscr_minimum` for
     P(lowest hold-period DSCR < minimum). A fixed seed is reproducible.
+    A run whose IRR doesn't converge counts as below the hurdle, not as
+    passing it. `hurdle_on_gross_irr` compares against the IRR before
+    closing and selling costs, the basis the risk-adjusted hurdle is quoted on.
     """
+    rho = float(spec.exit_cap_rent_growth_correlation)
+    if not -1 <= rho <= 1:
+        raise ValueError("correlation must be between -1 and 1")
     if spec.simulations < 1:
         raise ValueError("simulations must be at least 1")
     rng = random.Random(spec.seed)
@@ -192,11 +214,15 @@ def monte_carlo(
     has_debt = total_debt(deal) > 0
 
     for _ in range(spec.simulations):
+        z_cap = rng.gauss(0.0, 1.0)
+        z_rent = rho * z_cap + math.sqrt(1 - rho * rho) * rng.gauss(0.0, 1.0)
         trial = replace(
             deal,
-            exit_cap_rate=_clamp(_draw(rng, deal.exit_cap_rate, spec.exit_cap_sd), MIN_EXIT_CAP, 1),
+            exit_cap_rate=_clamp(
+                _shock(deal.exit_cap_rate, spec.exit_cap_sd, z_cap), MIN_EXIT_CAP, 1
+            ),
             rent_growth_rate=_clamp(
-                _draw(rng, deal.rent_growth_rate, spec.rent_growth_sd),
+                _shock(deal.rent_growth_rate, spec.rent_growth_sd, z_rent),
                 Decimal("-0.2"),
                 Decimal("0.2"),
             ),
@@ -207,8 +233,11 @@ def monte_carlo(
         metrics = compute(trial)
         if metrics.unlevered_irr is not None:
             unlevered.append(metrics.unlevered_irr)
-            if hurdle is not None and metrics.unlevered_irr < hurdle:
-                below_hurdle += 1
+        compared = (
+            metrics.unlevered_irr_before_costs if hurdle_on_gross_irr else metrics.unlevered_irr
+        )
+        if hurdle is not None and (compared is None or compared < hurdle):
+            below_hurdle += 1
         if metrics.levered_irr is not None:
             levered.append(metrics.levered_irr)
         if dscr_minimum is not None and has_debt:

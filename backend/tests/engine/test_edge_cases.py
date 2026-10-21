@@ -109,3 +109,83 @@ def test_non_converging_irr_returns_none_not_raises():
     metrics = compute(deal)
     assert metrics.unlevered_irr is None
     assert metrics.levered_irr is None
+
+
+# ------------------------------------------------- guards on impossible structures
+
+
+def _layer(layer_type, amount, **kwargs):
+    from app.engine.types import FinancingLayer
+
+    return FinancingLayer(layer_type=layer_type, amount=Decimal(amount), **kwargs)
+
+
+def test_balloon_inside_hold_gives_no_irr_rather_than_an_arbitrary_root():
+    from app.engine.types import LayerType
+
+    stack = (
+        _layer(
+            LayerType.BRIDGE_DEBT_FUND,
+            "6500000",
+            interest_rate=Decimal("0.08"),
+            io_months=36,
+            term_years=3,
+        ),
+        _layer(LayerType.SPONSOR_GP, "1"),
+    )
+    metrics = compute(replace(BASE_DEAL, capital_stack=stack, hold_period_years=5))
+    assert any(cf.balloon_payment > 0 for cf in metrics.annual_cash_flows)
+    # The balloon turns one year's cash flow negative between positive years.
+    assert min(cf.levered_cash_flow for cf in metrics.annual_cash_flows) < 0
+    assert metrics.levered_irr is None
+    assert metrics.unlevered_irr is not None  # financing doesn't touch it
+
+
+def test_negative_forward_noi_exit_value_is_floored_at_zero():
+    deal = replace(BASE_DEAL, opex_annual=Decimal("5000000.00"))
+    metrics = compute(deal)
+    assert metrics.forward_noi < 0
+    assert metrics.exit_value == 0
+
+
+def test_no_cash_on_cash_or_multiple_when_common_equity_is_not_positive():
+    over = replace(BASE_DEAL, loan_amount=Decimal("10500000.00"))
+    m = compute(over)
+    assert m.equity_invested < 0
+    assert m.cash_on_cash is None and m.equity_multiple is None
+
+
+def test_new_ranking_metrics():
+    metrics = compute(BASE_DEAL)
+    assert metrics.min_dscr == min(cf.noi / cf.debt_service for cf in metrics.annual_cash_flows)
+    assert metrics.debt_yield == metrics.year_one_noi / BASE_DEAL.loan_amount
+    assert metrics.unlevered_cash_yield == metrics.year_one_noi / Decimal("10200000.00")
+    # Costs only ever lower an IRR.
+    assert metrics.unlevered_irr_before_costs > metrics.unlevered_irr
+
+
+def test_all_cash_has_no_min_dscr_or_debt_yield():
+    metrics = compute(replace(BASE_DEAL, loan_amount=Decimal("0")))
+    assert metrics.min_dscr is None and metrics.debt_yield is None
+
+
+def test_engine_rejects_impossible_inputs_even_without_the_api():
+    import pytest
+
+    for change in (
+        {"monthly_rent_per_unit": Decimal("-1")},
+        {"vacancy_rate": Decimal("1.2")},
+        {"vacancy_rate": Decimal("-0.1")},
+        {"opex_annual": Decimal("-1")},
+        {"purchase_price": Decimal("0")},
+        {"closing_costs": Decimal("-1")},
+        {"exit_cap_rate": Decimal("0")},
+        {"selling_costs_rate": Decimal("1")},
+        {"rent_growth_rate": Decimal("-1")},
+        {"expense_growth_rate": Decimal("-0.02")},
+        {"annual_turnover_rate": Decimal("1.5")},
+        {"hold_period_years": 0},
+        {"credit_loss_rate": Decimal("-0.01")},
+    ):
+        with pytest.raises(ValueError):
+            replace(BASE_DEAL, **change)

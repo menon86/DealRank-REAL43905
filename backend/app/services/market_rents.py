@@ -205,6 +205,17 @@ def check_rent(
 
     latest = rows[0]
     market = Decimal(latest.median_rent)
+    if market <= 0:
+        return RentCheck(
+            "no_data",
+            per_unit_rent,
+            None,
+            None,
+            None,
+            None,
+            None,
+            f"The latest market rent for '{geography}' is not a positive number.",
+        )
     variance = (per_unit_rent - market) / market
 
     prior = next(

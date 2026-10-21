@@ -3,6 +3,7 @@ POST /deals/{id}/monte-carlo. Both re-run the real engine; neither is
 persisted.
 """
 
+import secrets
 import uuid
 from decimal import Decimal
 
@@ -74,14 +75,22 @@ def monte_carlo(
         h = build_hurdle(latest_spread(db, deal.sub_asset_class.value), get_treasury_10y())
         hurdle, hurdle_source = h.total, "risk_adjusted"
 
+    seed = payload.seed if payload.seed is not None else secrets.randbelow(2**31)
     spec = sensitivity.MonteCarloSpec(
         exit_cap_sd=payload.exit_cap_sd,
         rent_growth_sd=payload.rent_growth_sd,
         vacancy_sd=payload.vacancy_sd,
+        exit_cap_rent_growth_correlation=payload.exit_cap_rent_growth_correlation,
         simulations=payload.simulations,
-        seed=payload.seed,
+        seed=seed,
     )
-    result = sensitivity.monte_carlo(inputs, spec, hurdle=hurdle, dscr_minimum=payload.dscr_minimum)
+    result = sensitivity.monte_carlo(
+        inputs,
+        spec,
+        hurdle=hurdle,
+        dscr_minimum=payload.dscr_minimum,
+        hurdle_on_gross_irr=hurdle_source == "risk_adjusted",
+    )
 
     def dist(d):
         return DistributionOut(**vars(d)) if d else None
@@ -89,7 +98,7 @@ def monte_carlo(
     return MonteCarloResponse(
         simulations=result.simulations,
         converged=result.converged,
-        seed=payload.seed,
+        seed=seed,
         hurdle=hurdle,
         hurdle_source=hurdle_source,
         unlevered_irr=dist(result.unlevered_irr),

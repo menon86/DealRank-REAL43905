@@ -141,3 +141,72 @@ def test_reports_show_the_capital_stack_with_other_labels_as_typed(client):
     assert "Senior loan (type not specified)" in cells
     assert "Year 1 senior DSCR" in cells
     assert "Year 1 combined DSCR" in cells
+
+
+# ------------------------------------------------- common equity must exist
+
+
+def test_stack_whose_debt_covers_the_cost_is_rejected(client):
+    stack = [
+        {
+            "type": "agency_fannie_mae",
+            "amount": "20000000",
+            "interest_rate": "0.06",
+            "amortization_years": 30,
+        },
+        {"type": "mezzanine", "amount": "9000000", "interest_rate": "0.12"},
+        {
+            "type": "supplemental_loan",
+            "amount": "4000000",
+            "interest_rate": "0.08",
+            "amortization_years": 25,
+        },
+        {"type": "sponsor_gp", "amount": "1"},
+    ]
+    payload = {**SUBURBAN_GARDEN_PAYLOAD, "purchase_price": "22000000", "capital_stack": stack}
+    resp = client.post("/deals", json=payload)
+    assert resp.status_code == 422
+    assert "common equity" in resp.text
+
+
+def test_preferred_equity_counts_against_common_equity(client):
+    stack = [
+        {
+            "type": "agency_fannie_mae",
+            "amount": "18000000",
+            "interest_rate": "0.06",
+            "amortization_years": 30,
+        },
+        {"type": "preferred_equity", "amount": "10500000", "preferred_return": "0.09"},
+        {"type": "sponsor_gp", "amount": "1"},
+    ]
+    resp = client.post("/deals", json={**SUBURBAN_GARDEN_PAYLOAD, "capital_stack": stack})
+    assert resp.status_code == 422
+
+
+def test_single_loan_leaving_under_five_percent_equity_is_rejected(client):
+    payload = {
+        **SUBURBAN_GARDEN_PAYLOAD,
+        "purchase_price": "10000000",
+        "closing_costs": "100000",
+        "loan_amount": "10000000",
+    }
+    assert client.post("/deals", json=payload).status_code == 422
+
+
+def test_patch_cannot_push_a_deal_below_the_equity_floor(client):
+    deal = client.post("/deals", json=SUBURBAN_GARDEN_PAYLOAD).json()
+    resp = client.patch(f"/deals/{deal['id']}", json={"loan_amount": "28800000"})
+    assert resp.status_code == 422
+
+
+def test_rates_keep_sub_basis_point_precision(client):
+    payload = {
+        **SUBURBAN_GARDEN_PAYLOAD,
+        "interest_rate": "0.06125",
+        "exit_cap_rate": "0.05125",
+    }
+    created = client.post("/deals", json=payload).json()
+    fetched = client.get(f"/deals/{created['id']}").json()
+    assert Decimal(fetched["interest_rate"]) == Decimal("0.061250")
+    assert Decimal(fetched["exit_cap_rate"]) == Decimal("0.051250")
