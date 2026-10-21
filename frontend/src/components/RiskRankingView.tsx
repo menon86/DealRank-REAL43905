@@ -21,6 +21,7 @@ const NEED_LABELS = ["Irrelevant", "Nice to have", "Important", "Very important"
 
 const SOURCE_LABELS: Record<string, string> = {
   fred: "live, FRED DGS10",
+  treasury: "live, US Treasury par yield curve",
   fallback: "FALLBACK default — live lookup failed",
   override: "manual override",
 };
@@ -288,7 +289,7 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
       )}
       {result?.treasury.source === "fallback" && (
         <div className="status-banner info" role="status">
-          Couldn&apos;t reach FRED, so the hurdle uses a configured default Treasury yield. Enter an
+          Couldn&apos;t reach FRED or the US Treasury, so the hurdle uses a configured default Treasury yield. Enter an
           override above to use today&apos;s figure.
         </div>
       )}

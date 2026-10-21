@@ -64,6 +64,39 @@ def test_failure_falls_back_to_configured_yield_and_says_so(monkeypatch):
     assert quote.yield_ == D("0.046")
 
 
+TREASURY_XML = """<feed xmlns="http://www.w3.org/2005/Atom"
+ xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices"
+ xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+<entry><content><m:properties>
+<d:NEW_DATE m:type="Edm.DateTime">2026-10-19T00:00:00</d:NEW_DATE>
+<d:BC_10YEAR m:type="Edm.Double">5.10</d:BC_10YEAR>
+</m:properties></content></entry>
+<entry><content><m:properties>
+<d:NEW_DATE m:type="Edm.DateTime">2026-10-20T00:00:00</d:NEW_DATE>
+<d:BC_10YEAR m:type="Edm.Double">5.12</d:BC_10YEAR>
+</m:properties></content></entry>
+</feed>"""
+
+
+def test_parse_treasury_xml_takes_latest_date():
+    quote = treasury.parse_treasury_xml(TREASURY_XML)
+    assert (quote.yield_, quote.as_of, quote.source) == (
+        D("0.0512"),
+        date(2026, 10, 20),
+        "treasury",
+    )
+
+
+def test_fred_maintenance_page_falls_through_to_treasury_gov(monkeypatch):
+    def handler(url):
+        text = "<html>Site Maintenance</html>" if "fred" in url else TREASURY_XML
+        return httpx.Response(200, text=text, request=httpx.Request("GET", url))
+
+    _mock_get(monkeypatch, handler)
+    quote = treasury.get_treasury_10y()
+    assert (quote.source, quote.yield_) == ("treasury", D("0.0512"))
+
+
 def test_http_error_status_also_falls_back(monkeypatch):
     _mock_get(monkeypatch, lambda url: httpx.Response(503, request=httpx.Request("GET", url)))
     assert treasury.get_treasury_10y().source == "fallback"
