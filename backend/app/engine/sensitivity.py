@@ -10,6 +10,7 @@ import random
 from dataclasses import dataclass, replace
 from decimal import Decimal
 
+from app.engine.financing import total_debt
 from app.engine.metrics import compute
 from app.engine.types import DealInputs
 
@@ -188,7 +189,7 @@ def monte_carlo(
     levered: list[Decimal] = []
     below_hurdle = 0
     dscr_breaches = 0
-    has_debt = deal.loan_amount > 0
+    has_debt = total_debt(deal) > 0
 
     for _ in range(spec.simulations):
         trial = replace(

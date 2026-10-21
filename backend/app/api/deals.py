@@ -22,9 +22,23 @@ def _get_deal_or_404(db: Session, deal_id: uuid.UUID) -> Deal:
     return deal
 
 
+def _column_values(payload: DealBase) -> dict:
+    """Validated payload -> ORM column values. The capital stack goes into
+    a JSON column, so it's dumped in JSON mode (Decimals as strings,
+    enums as their values); every other field keeps its Python type.
+    """
+    values = payload.model_dump(exclude={"capital_stack"})
+    values["capital_stack"] = (
+        None
+        if payload.capital_stack is None
+        else [layer.model_dump(mode="json") for layer in payload.capital_stack]
+    )
+    return values
+
+
 @router.post("", response_model=DealOut, status_code=201)
 def create_deal(payload: DealCreate, db: Session = Depends(get_db)) -> Deal:
-    deal = Deal(**payload.model_dump())
+    deal = Deal(**_column_values(payload))
     db.add(deal)
     db.commit()
     db.refresh(deal)
@@ -52,11 +66,14 @@ def update_deal(deal_id: uuid.UUID, payload: DealUpdate, db: Session = Depends(g
     # leave a deal in a state POST would have rejected with a 422.
     merged = {field: updates.get(field, getattr(deal, field)) for field in DealBase.model_fields}
     try:
-        DealBase(**merged)
+        validated = DealBase(**merged)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    for field, value in updates.items():
+    # Write back the validated row, not just the patched fields: with a
+    # capital stack, the single-loan fields are re-derived from the senior
+    # layer even when the patch only touched the stack.
+    for field, value in _column_values(validated).items():
         setattr(deal, field, value)
 
     db.commit()

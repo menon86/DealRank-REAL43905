@@ -184,31 +184,60 @@ $$\text{Other Income Annual} = \text{Parking Income} + \text{Storage Income} + \
 
 ---
 
-### 3. Flexible Financing Structures & Loan Types
+### 3. Capital Stack: Multi-Layer Financing
 
-Deliverable 2 modeled a single fixed-rate amortizing loan with level monthly payments. Deliverable 3 introduces institutional financing flexibility:
+Deliverable 2 modeled a single fixed-rate amortizing loan. A deal can now carry a **capital
+stack** (`deals.capital_stack`): one or more layers, each with a type, an amount and its own
+terms. The engine lives in `backend/app/engine/financing.py` and `debt.py`. A deal without a
+stack keeps the original single loan, modeled as one implicit senior layer with no I/O and no
+maturity, so every Deliverable 2 golden case is unchanged.
 
-#### A. Interest-Only (I/O) Periods
-Borrowers frequently negotiate 1 to 5 years of interest-only payments before principal amortization begins:
-- **During I/O Period ($m \le 12 \times \text{io\_years}$)**:
-  $$\text{Monthly Payment} = \text{loan\_amount} \times \left(\frac{\text{interest\_rate}}{12}\right)$$
-  $$\text{Principal Paid} = 0$$
-- **Post-I/O Amortization Period ($m > 12 \times \text{io\_years}$)**:
-  The loan amortizes over the *remaining* term ($\text{amortization\_years} - \text{io\_years}$):
-  $$\text{Monthly Payment} = \text{loan\_amount} \times \frac{r(1+r)^{12 \times (\text{amort\_years} - \text{io\_years})}}{(1+r)^{12 \times (\text{amort\_years} - \text{io\_years})} - 1}$$
-  where $r = \frac{\text{interest\_rate}}{12}$.
+**Layer types.** Senior debt: Agency (Fannie Mae, Freddie Mac), HUD/FHA 223(f) and 221(d)(4),
+bank / credit union, life company, CMBS, bridge / debt fund, construction, loan assumption,
+seller financing. Subordinate: mezzanine, preferred equity, supplemental loan, seller carryback
+second. Equity: sponsor / GP, LP syndication, JV partner, 1031 proceeds, DST / TIC, Opportunity
+Zone fund, all cash. Each group has an "Other" type with a user-entered name, which reports
+show as typed. Every subordinate type except preferred equity is debt.
 
-#### B. Floating-Rate Financing
-- Modeled as **Reference Index (SOFR) + Margin / Spread**.
-- Supports user-defined interest rate caps and index forward curves.
+**Rules.** Exactly one senior debt layer unless the deal is all cash (and an all-cash deal has
+no debt layers); at least one equity layer; floating-rate layers need an index rate and a
+spread; I/O months can't exceed the term. When a stack is saved, `loan_amount`,
+`interest_rate` and `amortization_years` are overwritten from the senior layer, so anything
+reading them (LTV, the assumptions report) sees the senior loan.
 
-#### C. Balloon Payments at Loan Maturity
-- Loan term (e.g., 5 or 7 years) may be shorter than the 30-year amortization schedule.
-- At loan maturity or hold exit (whichever occurs first), the outstanding principal balance is paid in full as a balloon payment, properly factored into terminal net sale proceeds or refinancing cash flow.
+#### A. Debt layers
+Each debt layer is simulated month by month (decision D2) and the layers are summed per year.
+- **Rate**: fixed, or floating = index + spread, held flat over the hold (no forward curve).
+- **Interest-only**: for months $m \le 	ext{io\_months}$, payment = balance $	imes r$,
+  principal = 0, where $r = 	ext{rate}/12$.
+- **Amortization**: after I/O, a level payment solved on the balance at the end of I/O over the
+  *remaining* months, $12 	imes 	ext{amortization\_years} - 	ext{io\_months}$. A blank
+  amortization means interest-only for the whole term (typical for mezzanine).
+- **Maturity**: a term ending inside the hold is repaid as a **balloon** that month, out of
+  that year's levered cash flow (no refinancing is modeled). A term ending at or after the exit
+  is repaid from sale proceeds like any other loan balance.
+- **Upfront costs**: origination fee (% of the layer) and rate cap cost are paid at closing out
+  of equity.
+- **Recourse** is recorded and reported but has no effect on the math.
 
-#### D. Multi-Tranche Debt (Senior + Mezzanine)
-- Blended Cost of Capital and composite DSCR calculation:
-  $$\text{Composite DSCR} = \frac{\text{NOI}}{\text{Senior Debt Service} + \text{Mezzanine Debt Service}}$$
+#### B. Preferred equity
+Funds its amount at closing, receives `amount × preferred_return` every year ahead of common
+equity (current pay), and gets its capital back at exit after debt. It is not debt: it's in
+neither DSCR.
+
+#### C. Waterfall and metrics with a stack
+```
+Debt service (year n)   = sum of every debt layer's interest + principal
+Levered CF (year n)     = NOI - debt service - preferred return - any balloon that year
+Common equity invested  = price + closing costs + fees and rate caps - all debt - preferred equity
+Net sale proceeds       = exit value - selling costs - every debt balance at exit
+                          - preferred equity repaid
+Senior DSCR             = NOI / senior loan debt service
+Combined DSCR           = NOI / debt service on every debt layer   (year_one_dscr)
+```
+Cash-on-cash, levered IRR and the equity multiple are measured on common equity. **Unlevered
+IRR, and therefore ranking, is unaffected by financing.** Equity layer amounts describe who
+supplied the equity; the math always uses the residual common equity above.
 
 ---
 

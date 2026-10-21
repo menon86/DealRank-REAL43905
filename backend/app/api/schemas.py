@@ -12,10 +12,43 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from app.api.converters import engine_layer
 from app.api.ranking_data import RANKING_BASIS_NOTE
+from app.engine.financing import validate_capital_stack
+from app.engine.types import LayerGroup, LayerType, RateType
 from app.models.deal import LeasingMode, SubAssetClass
 
 DealName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+LayerLabel = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+IndexName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)]
+
+
+class CapitalStackLayer(BaseModel):
+    """One capital stack layer. Which fields matter depends on the type:
+    debt layers use the rate/term fields, preferred equity uses
+    preferred_return, equity layers only amount and label. The cross-layer
+    rules (one senior loan, at least one equity layer, ...) live in
+    app/engine/financing.py validate_capital_stack.
+    """
+
+    type: LayerType
+    label: LayerLabel | None = None
+    amount: Decimal = Field(ge=0)
+
+    rate_type: RateType = RateType.FIXED
+    interest_rate: Decimal | None = Field(default=None, ge=0, le=1)
+    index_name: IndexName | None = None
+    index_rate: Decimal | None = Field(default=None, ge=0, le=1)
+    spread: Decimal | None = Field(default=None, ge=0, le=1)
+    io_months: int = Field(default=0, ge=0, le=600)
+    amortization_years: int | None = Field(default=None, gt=0, le=50)
+    term_years: int | None = Field(default=None, gt=0, le=50)
+    recourse: bool | None = None
+
+    rate_cap_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    origination_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+
+    preferred_return: Decimal | None = Field(default=None, ge=0, le=1)
 
 
 class DealBase(BaseModel):
@@ -48,6 +81,36 @@ class DealBase(BaseModel):
     hold_period_years: int = Field(gt=0, le=30)
     exit_cap_rate: Decimal = Field(gt=0, le=1)
     selling_costs_rate: Decimal = Field(ge=0, lt=1)
+
+    # None = the single loan above. When set, loan_amount / interest_rate /
+    # amortization_years are overwritten from the senior layer (see
+    # _capital_stack_rules), so they always describe the senior loan.
+    capital_stack: list[CapitalStackLayer] | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def _capital_stack_rules(self) -> "DealBase":
+        """Checks the stack against validate_capital_stack, then mirrors the
+        senior layer onto the single-loan fields. An all-cash stack sets the
+        loan amount and rate to zero (amortization keeps whatever was sent,
+        since the column can't be zero and a zero loan never reads it).
+        """
+        if not self.capital_stack:
+            return self
+        layers = [engine_layer(layer.model_dump()) for layer in self.capital_stack]
+        errors = validate_capital_stack(layers)
+        if errors:
+            raise ValueError("capital_stack: " + " ".join(errors))
+
+        senior = next((layer for layer in layers if layer.group is LayerGroup.SENIOR), None)
+        if senior is None:
+            self.loan_amount = Decimal("0")
+            self.interest_rate = Decimal("0")
+        else:
+            self.loan_amount = senior.amount
+            self.interest_rate = senior.all_in_rate
+            if senior.amortization_years is not None:
+                self.amortization_years = senior.amortization_years
+        return self
 
     @model_validator(mode="after")
     def _leasing_mode_matches_populated_branch(self) -> "DealBase":
@@ -119,6 +182,8 @@ class DealUpdate(BaseModel):
     loan_amount: Decimal | None = None
     interest_rate: Decimal | None = None
     amortization_years: int | None = None
+    # Explicit null clears the stack and returns the deal to the single loan.
+    capital_stack: list[CapitalStackLayer] | None = None
 
     hold_period_years: int | None = None
     exit_cap_rate: Decimal | None = None
@@ -153,6 +218,9 @@ class AnnualCashFlowOut(BaseModel):
     ending_loan_balance: Decimal
     levered_cash_flow: Decimal
     unlevered_cash_flow: Decimal
+    senior_debt_service: Decimal
+    balloon_payment: Decimal
+    preferred_distribution: Decimal
 
 
 class MetricsOut(BaseModel):
@@ -173,6 +241,12 @@ class MetricsOut(BaseModel):
     forward_noi: Decimal
     selling_costs: Decimal
     loan_balance_at_exit: Decimal
+    # year_one_dscr is the combined DSCR (every debt layer).
+    year_one_senior_dscr: Decimal | None
+    total_debt: Decimal
+    preferred_equity: Decimal
+    upfront_financing_costs: Decimal
+    preferred_equity_repayment: Decimal
 
 
 class RankRequest(BaseModel):

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, Numeric, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -78,6 +78,11 @@ class Deal(Base):
     loan_amount: Mapped[Numeric] = mapped_column(Numeric(14, 2), nullable=False)
     interest_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
     amortization_years: Mapped[int] = mapped_column(nullable=False)
+    # Capital stack layers as JSON (see app/api/schemas.py FinancingLayer).
+    # NULL = the single loan described by the three columns above. When
+    # set, the API keeps those three columns in step with the senior layer
+    # so anything reading them (LTV, reports) still sees the senior loan.
+    capital_stack: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # --- Hold / exit ---
     hold_period_years: Mapped[int] = mapped_column(nullable=False)
