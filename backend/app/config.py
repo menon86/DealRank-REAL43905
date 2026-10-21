@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # on it as "fallback" so it is never mistaken for a live quote.
     TREASURY_10Y_FALLBACK: Decimal = Decimal("0.046")
     FRED_SERIES_URL: str = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
+    # Second live source, tried when FRED is down. {year} is filled in at call time.
+    TREASURY_YIELD_CURVE_URL: str = (
+        "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
+        "pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value={year}"
+    )
 
     @field_validator("DATABASE_URL")
     @classmethod
