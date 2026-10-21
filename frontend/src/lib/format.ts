@@ -41,3 +41,23 @@ export function formatNumber(value: number | null, digits = 2): string {
   if (value === null || Number.isNaN(value)) return "—";
   return value.toFixed(digits);
 }
+
+/**
+ * Keeps only what a plain number can hold: digits, one decimal point, and a
+ * leading minus. Commas the user types or pastes are dropped, so form state
+ * always holds a string `Number()` can read.
+ */
+export function stripNumberInput(text: string): string {
+  const negative = text.trimStart().startsWith("-");
+  const [whole, ...rest] = text.replace(/[^\d.]/g, "").split(".");
+  const fraction = rest.length > 0 ? `.${rest.join("")}` : "";
+  return `${negative ? "-" : ""}${whole}${fraction}`;
+}
+
+/** "650000.5" -> "650,000.5", for showing a money or count field in an <input>. */
+export function groupThousands(raw: string): string {
+  const match = /^(-?)(\d*)(.*)$/.exec(raw);
+  if (!match) return raw;
+  const [, sign, whole, rest] = match;
+  return `${sign}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${rest}`;
+}
