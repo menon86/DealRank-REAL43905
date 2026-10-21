@@ -12,6 +12,7 @@ import {
 } from "../lib/capitalStack";
 import type { LayerForm } from "../lib/capitalStack";
 import { formatMoney } from "../lib/format";
+import { NumberInput } from "./NumberInput";
 import type { LayerGroup, LayerType } from "../lib/types";
 
 interface CapitalStackEditorProps {
@@ -254,19 +255,21 @@ function LayerRow({ index, layer, totalCost, onUpdate, onTypeChange, onRemove }:
             {layer.amountMode === "dollars" ? "Amount ($)" : "Amount (% of total cost)"}
           </label>
           <div className="amount-input">
-            <input
-              id={id("amount")}
-              type="number"
-              step={layer.amountMode === "dollars" ? "1000" : "0.1"}
-              value={layer.amountMode === "dollars" ? layer.amount : layer.amountPct}
-              onChange={(e) =>
-                onUpdate(
-                  layer.amountMode === "dollars"
-                    ? { amount: e.target.value }
-                    : { amountPct: e.target.value },
-                )
-              }
-            />
+            {layer.amountMode === "dollars" ? (
+              <NumberInput
+                id={id("amount")}
+                value={layer.amount}
+                onChange={(v) => onUpdate({ amount: v })}
+              />
+            ) : (
+              <input
+                id={id("amount")}
+                type="number"
+                step="0.1"
+                value={layer.amountPct}
+                onChange={(e) => onUpdate({ amountPct: e.target.value })}
+              />
+            )}
             <div className="unit-toggle" role="group" aria-label="Enter amount as">
               <button
                 type="button"
@@ -380,11 +383,10 @@ function LayerRow({ index, layer, totalCost, onUpdate, onTypeChange, onRemove }:
                   </div>
                   <div className="field">
                     <label htmlFor={id("rate_cap")}>Rate cap cost ($)</label>
-                    <input
+                    <NumberInput
                       id={id("rate_cap")}
-                      type="number"
                       value={layer.rate_cap_cost}
-                      onChange={(e) => onUpdate({ rate_cap_cost: e.target.value })}
+                      onChange={(v) => onUpdate({ rate_cap_cost: v })}
                     />
                   </div>
                 </>
