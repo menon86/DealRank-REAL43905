@@ -80,7 +80,11 @@ TREASURY_XML = """<feed xmlns="http://www.w3.org/2005/Atom"
 
 def test_parse_treasury_xml_takes_latest_date():
     quote = treasury.parse_treasury_xml(TREASURY_XML)
-    assert (quote.yield_, quote.as_of, quote.source) == (D("0.0512"), date(2026, 10, 20), "treasury")
+    assert (quote.yield_, quote.as_of, quote.source) == (
+        D("0.0512"),
+        date(2026, 10, 20),
+        "treasury",
+    )
 
 
 def test_fred_maintenance_page_falls_through_to_treasury_gov(monkeypatch):

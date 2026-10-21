@@ -4,7 +4,8 @@ Read from FRED's public CSV endpoint (no API key), cached in-process for
 six hours. If FRED is unreachable (it has maintenance outages) the same
 yield is read from the US Treasury's own daily par yield curve feed. If
 both fail the configured fallback yield is returned and labelled
-source="fallback" so callers can surface that it is not a live quote. Callers can also bypass all of this with an explicit override.
+source="fallback" so callers can surface that it is not a live quote. Callers
+can also bypass all of this with an explicit override.
 """
 
 from __future__ import annotations
