@@ -114,12 +114,30 @@ def test_empty_current_month_uses_previous_month(monkeypatch):
 def test_http_error_status_also_falls_back(monkeypatch):
     _mock_get(monkeypatch, lambda url: httpx.Response(503, request=httpx.Request("GET", url)))
     assert treasury.get_treasury_10y().source == "fallback"
-    # A fallback is not cached: the next call tries the network again.
+    # A fallback is not cached as a quote, but the failure is remembered for a
+    # minute so an outage doesn't cost a timeout on every request.
     _mock_get(
         monkeypatch,
         lambda url: httpx.Response(200, text=FRED_CSV, request=httpx.Request("GET", url)),
     )
-    assert treasury.get_treasury_10y().source == "fred"
+    assert treasury.get_treasury_10y().source == "fallback"
+    # After the backoff (or a forced refresh) the network is tried again.
+    assert treasury.get_treasury_10y(use_cache=False).source == "fred"
+
+
+def test_failed_lookup_is_not_retried_within_the_backoff(monkeypatch):
+    calls = []
+
+    def boom(url):
+        calls.append(url)
+        raise httpx.ConnectError("down")
+
+    _mock_get(monkeypatch, boom)
+    assert treasury.get_treasury_10y().source == "fallback"
+    tried = len(calls)  # one attempt per source on the first lookup
+    for _ in range(2):
+        assert treasury.get_treasury_10y().source == "fallback"
+    assert len(calls) == tried
 
 
 def test_override():

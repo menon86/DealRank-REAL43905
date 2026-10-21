@@ -133,8 +133,8 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
           <div>
             <dt>Gate</dt>
             <dd>
-              Deals with year-one DSCR below the minimum are <strong>excluded</strong>, not
-              penalized.
+              Deals with lowest DSCR over the hold below the minimum are <strong>excluded</strong>,
+              not penalized.
             </dd>
           </div>
           <div>
@@ -319,7 +319,7 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
                     Deal
                   </th>
                   <th scope="col" className="col-ranking-basis">
-                    Unlevered IRR
+                    Unlevered IRR (before costs)
                   </th>
                   <th scope="col">Hurdle</th>
                   <th scope="col" className="col-ranking-basis">
@@ -343,8 +343,13 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
                       <div className="sub-class">
                         {SUB_ASSET_CLASS_LABELS[r.deal.sub_asset_class]}
                       </div>
+                      {r.warnings.map((w) => (
+                        <div key={w} className="sub-class" role="note">
+                          ⚠ {w}
+                        </div>
+                      ))}
                     </td>
-                    <td className="col-ranking-basis">{formatPercent(r.metrics.unlevered_irr)}</td>
+                    <td className="col-ranking-basis">{formatPercent(r.metrics.unlevered_irr_before_costs)}</td>
                     <td
                       title={`${formatPercent(r.hurdle.treasury_yield)} Treasury + ${formatPercent(
                         r.hurdle.spread_bps / 10000,

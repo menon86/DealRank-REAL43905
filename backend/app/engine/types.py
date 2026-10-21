@@ -245,6 +245,18 @@ class DealInputs:
     # replace those three fields entirely (see app/engine/financing.py).
     capital_stack: tuple[FinancingLayer, ...] = ()
 
+    # --- Optional lines (all default to 0, which reproduces the original model) ---
+    # Other income grows at this rate (0 = flat, the original behaviour).
+    other_income_growth_rate: Decimal = Decimal("0")
+    # Share of GPR lost to bad debt and concessions, on top of vacancy.
+    credit_loss_rate: Decimal = Decimal("0")
+    # Share of EGI paid as a management fee; part of NOI.
+    management_fee_rate: Decimal = Decimal("0")
+    # Annual replacement reserve per unit or bed, grown at expense growth.
+    # Paid below NOI (NOI, cap rate, DSCR and exit value are before reserves),
+    # so it reduces cash flow and IRR but not the exit value.
+    replacement_reserve_per_unit_or_bed: Decimal = Decimal("0")
+
     def __post_init__(self) -> None:
         if self.leasing_mode is LeasingMode.PER_UNIT:
             if self.unit_count is None or self.monthly_rent_per_unit is None:
@@ -261,6 +273,8 @@ class DealInputs:
         else:  # pragma: no cover - exhaustive enum guard
             raise ValueError(f"unknown leasing_mode: {self.leasing_mode}")
 
+        self._validate_ranges()
+
         if self.capital_stack:
             # Imported here: financing.py imports this module.
             from app.engine.financing import validate_capital_stack
@@ -268,6 +282,57 @@ class DealInputs:
             errors = validate_capital_stack(self.capital_stack)
             if errors:
                 raise ValueError("; ".join(errors))
+
+    def _validate_ranges(self) -> None:
+        """Defense in depth behind the API's field constraints: a row edited
+        directly in the DB, or a bad programmatic input, must not produce
+        numbers from a negative rent or a vacancy rate above 100%.
+        """
+        non_negative = {
+            "other_income_annual": self.other_income_annual,
+            "opex_annual": self.opex_annual,
+            "expense_growth_rate": self.expense_growth_rate,
+            "turnover_cost_per_unit_or_bed": self.turnover_cost_per_unit_or_bed,
+            "closing_costs": self.closing_costs,
+            "loan_amount": self.loan_amount,
+            "interest_rate": self.interest_rate,
+            "selling_costs_rate": self.selling_costs_rate,
+            "credit_loss_rate": self.credit_loss_rate,
+            "management_fee_rate": self.management_fee_rate,
+            "replacement_reserve_per_unit_or_bed": self.replacement_reserve_per_unit_or_bed,
+        }
+        for name, value in non_negative.items():
+            if value < 0:
+                raise ValueError(f"{name} can't be negative")
+        shares = {
+            "vacancy_rate": self.vacancy_rate,
+            "annual_turnover_rate": self.annual_turnover_rate,
+            "credit_loss_rate": self.credit_loss_rate,
+            "management_fee_rate": self.management_fee_rate,
+        }
+        for name, value in shares.items():
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} must be between 0 and 100%")
+        positive = {
+            "purchase_price": self.purchase_price,
+            "exit_cap_rate": self.exit_cap_rate,
+            "hold_period_years": self.hold_period_years,
+            "monthly_rent_per_unit": self.monthly_rent_per_unit,
+            "monthly_rent_per_bed": self.monthly_rent_per_bed,
+            "unit_count": self.unit_count,
+            "bed_count": self.bed_count,
+        }
+        for name, value in positive.items():
+            if value is not None and value <= 0:
+                raise ValueError(f"{name} must be above zero")
+        if self.selling_costs_rate >= 1:
+            raise ValueError("selling_costs_rate must be below 100%")
+        for name, value in (
+            ("rent_growth_rate", self.rent_growth_rate),
+            ("other_income_growth_rate", self.other_income_growth_rate),
+        ):
+            if value <= -1:
+                raise ValueError(f"{name} must be above -100%")
 
     @property
     def unit_or_bed_count(self) -> int:
@@ -303,6 +368,14 @@ class AnnualCashFlow:
     senior_debt_service: Decimal = Decimal("0")
     balloon_payment: Decimal = Decimal("0")
     preferred_distribution: Decimal = Decimal("0")
+    # Preferred return that couldn't be paid from cash flow this year, and
+    # the running unpaid total (settled at exit).
+    preferred_shortfall: Decimal = Decimal("0")
+    preferred_accrued: Decimal = Decimal("0")
+    # Optional lines.
+    credit_loss: Decimal = Decimal("0")
+    management_fee: Decimal = Decimal("0")
+    replacement_reserves: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -337,3 +410,11 @@ class DealMetrics:
     preferred_equity: Decimal = Decimal("0")
     upfront_financing_costs: Decimal = Decimal("0")
     preferred_equity_repayment: Decimal = Decimal("0")
+    # Ranking inputs. Gross IRR is before closing and selling costs (the
+    # basis the risk-adjusted hurdle is quoted on); min DSCR is the lowest
+    # combined DSCR over the hold; debt yield is year-one NOI over all debt;
+    # unlevered cash yield is year-one NOI over price + closing costs.
+    unlevered_irr_before_costs: Decimal | None = None
+    min_dscr: Decimal | None = None
+    debt_yield: Decimal | None = None
+    unlevered_cash_yield: Decimal = Decimal("0")

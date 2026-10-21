@@ -32,6 +32,7 @@ from app.engine.ranking import (
     Candidate,
     RiskAdjustedHurdle,
     Weights,
+    passes_debt_yield_gate,
     passes_dscr_gate,
     questionnaire_to_weights,
     score_candidates,
@@ -43,10 +44,11 @@ from app.services.treasury import TreasuryQuote, get_treasury_10y, override_quot
 router = APIRouter(tags=["risk-adjusted-ranking"])
 
 BASIS_NOTE = (
-    "Ranked on unlevered IRR minus each deal's own risk-adjusted hurdle "
+    "Ranked on unlevered IRR (before closing and selling costs, the basis the "
+    "hurdle is quoted on) minus each deal's own risk-adjusted hurdle "
     "(10-Year Treasury + sub-class cap-rate spread + stabilized NOI growth). "
-    "Deals below the DSCR minimum are excluded, not penalized. Levered IRR is "
-    "reference only and is never sorted on."
+    "Deals below the DSCR minimum (lowest DSCR over the hold) are excluded, "
+    "not penalized. Levered IRR is reference only and is never sorted on."
 )
 
 
@@ -111,6 +113,25 @@ def _resolve_weights(payload: RiskRankRequest) -> Weights:
     return RETURN_ONLY
 
 
+RENT_GROWTH_TOLERANCE = Decimal("0.01")
+
+
+def _warnings(deal: Deal, metrics, hurdle: HurdleOut) -> list[str]:
+    """Assumptions that flatter the return without being an error."""
+    warnings = []
+    if deal.exit_cap_rate < metrics.going_in_cap_rate:
+        warnings.append(
+            f"Exit cap {deal.exit_cap_rate * 100:.2f}% is below the going-in cap "
+            f"{metrics.going_in_cap_rate * 100:.2f}%: the return leans on cap-rate compression."
+        )
+    if deal.rent_growth_rate > hurdle.noi_growth + RENT_GROWTH_TOLERANCE:
+        warnings.append(
+            f"Rent growth {deal.rent_growth_rate * 100:.2f}% is well above the "
+            f"{hurdle.noi_growth * 100:.2f}% stabilized growth the hurdle assumes."
+        )
+    return warnings
+
+
 @router.post("/rank/risk-adjusted", response_model=RiskRankResponse, response_model_by_alias=True)
 def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) -> RiskRankResponse:
     treasury = (
@@ -121,7 +142,7 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
     weights = _resolve_weights(payload)
 
     evaluated = []
-    for deal_id in payload.deal_ids:
+    for deal_id in dict.fromkeys(payload.deal_ids):
         deal = db.get(Deal, deal_id)
         if deal is None:
             raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
@@ -134,12 +155,17 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
     kept = {}
     for deal, metrics, hurdle in evaluated:
         reason = None
-        if not passes_dscr_gate(metrics.year_one_dscr, payload.dscr_minimum):
+        if not passes_dscr_gate(metrics.min_dscr, payload.dscr_minimum):
             reason = (
-                f"Year-one DSCR {metrics.year_one_dscr:.2f}x is below the "
+                f"Lowest DSCR over the hold ({metrics.min_dscr:.2f}x) is below the "
                 f"{payload.dscr_minimum:.2f}x minimum."
             )
-        elif metrics.unlevered_irr is None:
+        elif not passes_debt_yield_gate(metrics.debt_yield, payload.debt_yield_minimum):
+            reason = (
+                f"Debt yield {metrics.debt_yield * 100:.2f}% is below the "
+                f"{payload.debt_yield_minimum * 100:.2f}% minimum."
+            )
+        elif metrics.unlevered_irr_before_costs is None:
             reason = "Unlevered IRR did not converge."
         if reason:
             excluded.append(
@@ -151,16 +177,16 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
                 )
             )
             continue
-        spread = metrics.unlevered_irr - hurdle.total
+        spread = metrics.unlevered_irr_before_costs - hurdle.total
         key = str(deal.id)
         kept[key] = (deal, metrics, hurdle, spread)
         candidates.append(
             Candidate(
                 key=key,
                 spread=spread,
-                cash_on_cash=metrics.cash_on_cash,
-                year_one_dscr=metrics.year_one_dscr,
-                ltv=deal.loan_amount / deal.purchase_price,
+                cash_yield=metrics.unlevered_cash_yield,
+                min_dscr=metrics.min_dscr,
+                leverage=(metrics.total_debt + metrics.preferred_equity) / deal.purchase_price,
             )
         )
 
@@ -178,7 +204,8 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
                 metrics=MetricsOut.model_validate(metrics),
                 hurdle=hurdle,
                 spread=spread,
-                ltv=deal.loan_amount / deal.purchase_price,
+                ltv=metrics.total_debt / deal.purchase_price,
+                warnings=_warnings(deal, metrics, hurdle),
                 factors=FactorScoresOut(
                     irr=s.factors.irr, cash_flow=s.factors.cash_flow, risk=s.factors.risk
                 ),

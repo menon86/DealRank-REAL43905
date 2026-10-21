@@ -181,3 +181,68 @@ def test_create_rejects_blank_and_overlong_names(client):
     ok = client.post("/deals", json={**payload, "name": "  Padded  "})
     assert ok.status_code == 201
     assert ok.json()["name"] == "Padded"
+
+
+# ------------------------------------------------- optional lines, unit mix, paging
+
+
+def test_optional_lines_and_unit_mix_round_trip_and_feed_the_engine(client):
+    from tests.api.payloads import SUBURBAN_GARDEN_PAYLOAD as P
+
+    mix = [
+        {
+            "id": "studio",
+            "name": "Studio",
+            "units": 60,
+            "beds_per_unit": 1,
+            "avg_sqft": 500,
+            "rent": "1200",
+        },
+        {
+            "id": "2bed",
+            "name": "2 Bed",
+            "units": 120,
+            "beds_per_unit": 2,
+            "avg_sqft": 900,
+            "rent": "1550",
+        },
+    ]
+    payload = {
+        **P,
+        "unit_mix": mix,
+        "management_fee_rate": "0.03",
+        "credit_loss_rate": "0.01",
+        "other_income_growth_rate": "0.025",
+        "replacement_reserve_per_unit_or_bed": "300",
+    }
+    created = client.post("/deals", json=payload)
+    assert created.status_code == 201, created.text
+    body = client.get(f"/deals/{created.json()['id']}").json()
+    assert [t["name"] for t in body["unit_mix"]] == ["Studio", "2 Bed"]
+    assert body["management_fee_rate"] == "0.030000"
+
+    plain = client.post("/deals", json=P).json()
+    with_lines = client.get(f"/deals/{body['id']}/metrics").json()
+    without = client.get(f"/deals/{plain['id']}/metrics").json()
+    assert Decimal(with_lines["year_one_noi"]) < Decimal(without["year_one_noi"])
+    first = with_lines["annual_cash_flows"][0]
+    assert Decimal(first["management_fee"]) > 0
+    assert Decimal(first["replacement_reserves"]) == Decimal("300") * P["unit_count"]
+
+
+def test_new_lines_default_to_zero(client):
+    from tests.api.payloads import SUBURBAN_GARDEN_PAYLOAD as P
+
+    deal = client.post("/deals", json=P).json()
+    assert Decimal(deal["management_fee_rate"]) == 0
+    assert deal["unit_mix"] is None
+
+
+def test_deal_list_is_paged(client):
+    from tests.api.payloads import SUBURBAN_GARDEN_PAYLOAD as P
+
+    for index in range(3):
+        client.post("/deals", json={**P, "name": f"Deal {index}"})
+    assert len(client.get("/deals?limit=2").json()) == 2
+    assert len(client.get("/deals?limit=2&offset=2").json()) >= 1
+    assert client.get("/deals?limit=0").status_code == 422

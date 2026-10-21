@@ -66,6 +66,15 @@ export interface CapitalStackLayer {
   preferred_return: number | null;
 }
 
+export interface UnitMixTierApi {
+  id: string;
+  name: string;
+  units: number;
+  beds_per_unit: number;
+  avg_sqft: number;
+  rent: number;
+}
+
 export interface DealInputFields {
   name: string;
   sub_asset_class: SubAssetClass;
@@ -98,6 +107,14 @@ export interface DealInputFields {
    * loan_amount / interest_rate / amortization_years from the senior layer.
    */
   capital_stack: CapitalStackLayer[] | null;
+
+  // Optional lines; 0 turns each off.
+  other_income_growth_rate: number;
+  credit_loss_rate: number;
+  management_fee_rate: number;
+  replacement_reserve_per_unit_or_bed: number;
+  /** The unit mix the aggregate count and rent came from; the engine ignores it. */
+  unit_mix: UnitMixTierApi[] | null;
 
   hold_period_years: number;
   exit_cap_rate: number;
@@ -133,6 +150,13 @@ export interface AnnualCashFlowOut {
   /** A loan maturing inside the hold, repaid out of that year's cash flow. */
   balloon_payment: number;
   preferred_distribution: number;
+  /** Preferred return that cash flow couldn't cover this year (accrues, paid at exit). */
+  preferred_shortfall: number;
+  preferred_accrued: number;
+  credit_loss: number;
+  management_fee: number;
+  /** Paid below NOI: NOI, cap rate and DSCR are before reserves. */
+  replacement_reserves: number;
 }
 
 export interface MetricsOut {
@@ -166,6 +190,14 @@ export interface MetricsOut {
   /** Origination fees and rate caps, paid at closing out of equity. */
   upfront_financing_costs: number;
   preferred_equity_repayment: number;
+  /** Unlevered IRR before closing and selling costs: the basis the risk-adjusted hurdle uses. */
+  unlevered_irr_before_costs: number | null;
+  /** Lowest combined DSCR over the hold; null when there is no debt. */
+  min_dscr: number | null;
+  /** Year-one NOI over all debt; null when there is no debt. */
+  debt_yield: number | null;
+  /** Year-one NOI over price + closing costs. */
+  unlevered_cash_yield: number;
 }
 
 export interface RankedDealOut {
@@ -244,7 +276,9 @@ export interface RiskRankedDealOut {
   metrics: MetricsOut;
   hurdle: HurdleOut;
   spread: number;
+  /** All debt layers / purchase price. */
   ltv: number;
+  warnings: string[];
   factors: Weights;
   score: number;
 }

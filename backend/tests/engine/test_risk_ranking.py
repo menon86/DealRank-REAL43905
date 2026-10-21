@@ -51,14 +51,14 @@ def test_weights_must_have_a_positive_entry():
         Weights(D(0), D(0), D(0)).normalized()
 
 
-def _cand(key, spread, coc, dscr, ltv):
-    return Candidate(key, D(spread), D(coc), None if dscr is None else D(dscr), D(ltv))
+def _cand(key, spread, cash_yield, dscr, leverage):
+    return Candidate(key, D(spread), D(cash_yield), None if dscr is None else D(dscr), D(leverage))
 
 
 CANDS = [
-    _cand("high_return", "0.04", "0.02", "1.30", "0.70"),
-    _cand("high_income", "0.01", "0.08", "1.50", "0.60"),
-    _cand("safe", "0.00", "0.04", "2.00", "0.40"),
+    _cand("high_return", "0.05", "0.03", "1.00", "0.80"),
+    _cand("high_income", "0.01", "0.08", "1.50", "0.40"),
+    _cand("safe", "-0.03", "0.04", "2.00", "0.20"),
 ]
 
 
@@ -80,29 +80,52 @@ def test_each_single_factor_picks_its_own_winner():
     assert winner(Weights(D(0), D(0), D(1))) == "safe"
 
 
-def test_risk_factor_is_mean_of_normalized_dscr_and_unlevered_share():
+def test_risk_factor_is_mean_of_scaled_dscr_and_unlevered_share():
     scored = {s.key: s for s in score_candidates(CANDS, Weights(D(0), D(0), D(1)))}
-    # safe has the max DSCR (1.0 normalized) and the lowest LTV (1.0).
+    # safe: DSCR 2.0 is the ceiling (1), leverage 20% -> equity share 80% is past the ceiling (1).
     assert scored["safe"].factors.risk == 1
-    # high_return has the min DSCR (0) and the highest LTV (0).
+    # high_return: DSCR 1.0 is the floor (0), leverage 80% -> equity share 20% is the floor (0).
     assert scored["high_return"].factors.risk == 0
-    # high_income: dscr (1.5-1.3)/0.7, ltv (0.7-0.6)/0.3
-    expected = ((D("0.2") / D("0.7")) + (D("0.1") / D("0.3"))) / 2
-    assert scored["high_income"].factors.risk == expected
+    # high_income: DSCR 1.5 -> 0.5, equity share 60% is the ceiling -> 1.
+    assert scored["high_income"].factors.risk == D("0.75")
 
 
-def test_ties_get_neutral_scores_and_all_cash_is_safe():
+def test_scores_do_not_change_when_other_candidates_are_added():
+    # Min-max scoring made A's score depend on who else was in the comparison.
+    a = _cand("a", "0.02", "0.05", "1.4", "0.6")
+    b = _cand("b", "0.03", "0.04", "1.5", "0.5")
+    outlier = _cand("outlier", "0.40", "0.30", "9", "0")
+    weights = Weights(D(1), D(1), D(1))
+    alone = {s.key: s.score for s in score_candidates([a, b], weights)}
+    crowded = {s.key: s.score for s in score_candidates([a, b, outlier], weights)}
+    assert alone["a"] == crowded["a"] and alone["b"] == crowded["b"]
+
+
+def test_single_candidate_is_scored_on_its_merits_not_neutral():
+    strong = score_candidates([_cand("a", "0.05", "0.08", "2", "0.2")], Weights(D(1), D(1), D(1)))
+    weak = score_candidates([_cand("a", "-0.03", "0.03", "1", "0.8")], Weights(D(1), D(1), D(1)))
+    assert abs(strong[0].score - 1) < D("1e-20") and weak[0].score == 0
+
+
+def test_identical_deals_tie_and_all_cash_is_safe():
     same = [_cand("a", "0.02", "0.05", "1.4", "0.6"), _cand("b", "0.02", "0.05", "1.4", "0.6")]
-    assert all(
-        abs(s.score - D("0.5")) < D("1e-20")
-        for s in score_candidates(same, Weights(D(1), D(1), D(1)))
-    )
+    scores = score_candidates(same, Weights(D(1), D(1), D(1)))
+    assert scores[0].score == scores[1].score
 
     cash = score_candidates(
         [_cand("cash", "0.02", "0.05", None, "0"), _cand("lev", "0.02", "0.05", "1.4", "0.6")],
         Weights(D(0), D(0), D(1)),
     )
     assert cash[0].factors.risk > cash[1].factors.risk
+
+
+def test_debt_yield_gate():
+    from app.engine.ranking import passes_debt_yield_gate
+
+    assert passes_debt_yield_gate(D("0.07"), None)  # gate off
+    assert passes_debt_yield_gate(None, D("0.09"))  # no debt
+    assert passes_debt_yield_gate(D("0.09"), D("0.09"))
+    assert not passes_debt_yield_gate(D("0.0899"), D("0.09"))
 
 
 def test_empty_candidates():

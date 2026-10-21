@@ -79,6 +79,10 @@ def deal_to_engine_inputs(deal: Deal) -> DealInputs:
             exit_cap_rate=deal.exit_cap_rate,
             selling_costs_rate=deal.selling_costs_rate,
             capital_stack=tuple(engine_layer(layer) for layer in deal.capital_stack or []),
+            other_income_growth_rate=deal.other_income_growth_rate,
+            credit_loss_rate=deal.credit_loss_rate,
+            management_fee_rate=deal.management_fee_rate,
+            replacement_reserve_per_unit_or_bed=deal.replacement_reserve_per_unit_or_bed,
         )
     except (ValueError, KeyError) as exc:
         raise HTTPException(

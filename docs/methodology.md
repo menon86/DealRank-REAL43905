@@ -104,9 +104,40 @@ stream).
 levered cash flow (NOI minus debt service), and the terminal year adds the net sale proceeds
 (which do subtract the loan payoff).
 
-Both IRRs are computed with a Newton's-method solver (`numpy-financial` in the backend, a small
-JS/TS port in the frontend's earlier mock client) and return `None`/`null` rather than raising or
-returning a nonsense value when a cash-flow stream doesn't converge to a real solution.
+Both IRRs are computed with `numpy-financial` and return `None`/`null` rather than raising or
+returning a nonsense value when a cash-flow stream doesn't converge, **or when it changes sign
+more than once** (for example a loan balloon repaid out of operating cash flow), because such a
+stream can have several IRRs and picking one would be arbitrary.
+
+Exit value is floored at zero: a property with negative forward NOI is worth nothing, not a
+negative amount. Cash-on-cash and the equity multiple are `None` when common equity is zero or
+negative.
+
+## Optional underwriting lines
+
+Each is a deal input that defaults to 0, which reproduces the model above exactly.
+
+```
+Other income (year N) = other_income_annual x (1 + other_income_growth_rate) ^ (N - 1)
+Credit loss           = GPR x credit_loss_rate                 (bad debt and concessions)
+EGI                   = GPR - Vacancy loss - Credit loss + Other income
+Management fee        = EGI x management_fee_rate
+NOI                   = EGI - OpEx - Turnover - Management fee
+Replacement reserves  = replacement_reserve_per_unit_or_bed x (units or beds)
+                         x (1 + expense_growth_rate) ^ (N - 1)
+```
+
+Reserves are paid **below NOI**: NOI, the going-in cap rate, DSCR and the exit value are before
+reserves, while levered and unlevered cash flow (and so every IRR and the multiple) are after them.
+Property-tax reassessment on sale is not modeled; put an expected post-sale tax level in OpEx.
+
+**Input ranges.** Rents, price, counts, hold and exit cap must be above zero; vacancy, turnover,
+credit loss and management fee are 0-100%; expense growth, closing and selling costs, OpEx, reserves
+and every capital stack amount, rate and fee are non-negative; rent growth may be negative (a
+declining market) but not -100% or lower. The API enforces this on create and update, and the
+engine re-checks it so a row edited directly in the database can't produce numbers.
+
+---
 
 ## Ranking
 
@@ -123,15 +154,35 @@ would let a deal win by taking on more leverage rather than by being a better as
 unlevered IRR doesn't converge sorts last rather than disappearing from the list.
 
 **Deliverable 3 (Underwriting Flexibility & Risk Framework)** replaces the flat hurdle with a risk-adjusted,
-sub-class-specific one (`10-Year Treasury + cap-rate spread + assumed stabilized NOI growth`) and
-adds a DSCR gate that excludes deals below a configured minimum from ranking entirely, rather than
-blending DSCR into the score. See the docstring in `backend/app/engine/ranking.py`.
+sub-class-specific one (`10-Year Treasury + cap-rate spread + assumed stabilized NOI growth`).
+See the docstring in `backend/app/engine/ranking.py`. How it ranks:
+
+- **Spread** = unlevered IRR *before closing and selling costs* minus the deal's hurdle. The hurdle
+  is a gross market return with no transaction costs, so comparing it with the net IRR would
+  penalize short holds (about 130 bps at a 3-year hold, 40 bps at 10).
+- **Gates** exclude a deal entirely rather than blending into the score: lowest DSCR over the hold
+  below the minimum (not year one, which hides an interest-only start), and an optional debt-yield
+  minimum (year-one NOI / total debt).
+- **Preference score** (only with weights or questionnaire answers) blends three factors, each
+  scaled against **fixed anchors** so a deal's score never depends on which other deals are
+  selected: return = spread (-3% to +5%); cash flow = unlevered year-one cash yield, NOI / (price +
+  closing costs) (3% to 8%); safety = the mean of lowest DSCR (1.0x to 2.0x) and equity share,
+  1 - (all debt + preferred equity) / price (20% to 60%). All-cash counts as maximum coverage.
+- The return and cash-flow factors are unlevered. The safety factor is deliberately leverage-aware,
+  so a non-zero risk weight lets financing choices move the order.
+- Rank order does not depend on the live Treasury (it shifts every deal's hurdle equally); only the
+  absolute spreads do.
+- A warning is attached when the exit cap is below the going-in cap, because the return then leans
+  on cap-rate compression.
 
 ---
 
 ## Deliverable 3 Advanced Underwriting Extensions
 
 ### 1. Granular Unit Mix Modeling
+
+> **Status:** a form-only calculator. The unit mix collapses into the aggregate unit/bed count and
+> average rent on the deal; the mix itself is not stored, and the engine has no per-tier code path.
 
 In institutional underwriting, properties are rarely modeled as a single aggregate unit count or bed count. Deliverable 3 supports a granular unit mix breakdown across 5 standardized unit types:
 - **Studio**
@@ -158,6 +209,10 @@ The weighted average rent per unit, weighted average rent per bed, and weighted 
 ---
 
 ### 2. Housing-Type Specific Custom Inputs & Ancillary Revenue
+
+> **Status:** form-only helpers that total parking, storage, pet and package income into
+> `other_income_annual`. RUBS recovery, parental guarantees, bad debt, summer operations and
+> commercial vacancy are **not modeled**. Other income is held flat across the hold.
 
 Different multifamily asset sub-classes feature fundamentally distinct revenue and operational expense drivers:
 
@@ -200,7 +255,8 @@ Zone fund, all cash. Each group has an "Other" type with a user-entered name, wh
 show as typed. Every subordinate type except preferred equity is debt.
 
 **Rules.** Exactly one senior debt layer unless the deal is all cash (and an all-cash deal has
-no debt layers); at least one equity layer; floating-rate layers need an index rate and a
+no debt layers); at least one equity layer; common equity of at least 5% of total cost (debt and
+preferred equity can't cover the whole deal); floating-rate layers need an index rate and a
 spread; I/O months can't exceed the term. When a stack is saved, `loan_amount`,
 `interest_rate` and `amortization_years` are overwritten from the senior layer, so anything
 reading them (LTV, the assumptions report) sees the senior loan.
@@ -208,10 +264,10 @@ reading them (LTV, the assumptions report) sees the senior loan.
 #### A. Debt layers
 Each debt layer is simulated month by month (decision D2) and the layers are summed per year.
 - **Rate**: fixed, or floating = index + spread, held flat over the hold (no forward curve).
-- **Interest-only**: for months $m \le 	ext{io\_months}$, payment = balance $	imes r$,
-  principal = 0, where $r = 	ext{rate}/12$.
+- **Interest-only**: for months $m \le \text{io\_months}$, payment = balance $\times r$,
+  principal = 0, where $r = \text{rate}/12$.
 - **Amortization**: after I/O, a level payment solved on the balance at the end of I/O over the
-  *remaining* months, $12 	imes 	ext{amortization\_years} - 	ext{io\_months}$. A blank
+  *remaining* months, $12 \times \text{amortization\_years} - \text{io\_months}$. A blank
   amortization means interest-only for the whole term (typical for mezzanine).
 - **Maturity**: a term ending inside the hold is repaid as a **balloon** that month, out of
   that year's levered cash flow (no refinancing is modeled). A term ending at or after the exit
@@ -222,7 +278,8 @@ Each debt layer is simulated month by month (decision D2) and the layers are sum
 
 #### B. Preferred equity
 Funds its amount at closing, receives `amount × preferred_return` every year ahead of common
-equity (current pay), and gets its capital back at exit after debt. It is not debt: it's in
+equity (current pay, but only out of cash left after debt service, balloons and reserves; any
+shortfall accrues unpaid), and gets its capital back plus the accrued shortfall at exit after debt. It is not debt: it's in
 neither DSCR.
 
 #### C. Waterfall and metrics with a stack
@@ -230,6 +287,7 @@ neither DSCR.
 Debt service (year n)   = sum of every debt layer's interest + principal
 Levered CF (year n)     = NOI - debt service - preferred return - any balloon that year
 Common equity invested  = price + closing costs + fees and rate caps - all debt - preferred equity
+                          (must be >= 5% of that total cost)
 Net sale proceeds       = exit value - selling costs - every debt balance at exit
                           - preferred equity repaid
 Senior DSCR             = NOI / senior loan debt service
@@ -243,9 +301,38 @@ supplied the equity; the math always uses the residual common equity above.
 
 ### 4. Excel Import / Upload Integration
 
+> **Status:** a client-side CSV/TSV importer only. `.xlsx` is not supported, and there is no
+> server-side validation engine; the API's normal 422 validation applies when the deal is saved.
+
 To eliminate repetitive manual data entry, analysts can ingest property underwriting details and debt terms directly from standard Excel workbooks (`.xlsx`, `.xls`) or CSV files:
 
 - **Property Details & Unit Mix Workbook**: Automatically maps columns for property identification, sub-asset class selection, 5-tier unit mix matrix, operating expenses, and turnover assumptions.
 - **Financing Workbook**: Automatically ingests debt structure, LTV, loan amount, interest rate, I/O period, amortization duration, and loan fees.
 - **Validation Engine**: Performs schema validation, verifies leasing-mode consistency, checks for positive unit counts and non-negative rents, and returns cell-level validation errors before database persistence.
 
+
+
+---
+
+## Sensitivity and Monte Carlo
+
+Each simulation draws an exit cap rate, a rent growth and a vacancy from normal distributions
+centred on the deal's own inputs. Exit cap and rent growth are correlated (default -0.3: weak rent
+markets tend to come with wider exit caps; adjustable per request). A draw applies to the **whole
+hold**, so this models uncertainty about the assumptions, not year-to-year volatility; interest
+rates, expense growth and the floating index are not varied. A run whose IRR doesn't converge counts
+as below the hurdle. The response always returns the seed used (one is drawn when none is sent), so
+any run can be reproduced. When the hurdle is the risk-adjusted one, runs are compared on the IRR
+before closing and selling costs, the basis the hurdle is quoted on.
+
+## Known limitations
+
+- Annual, end-of-period cash flows and IRR (no monthly timing or XIRR).
+- No refinancing: a loan maturing inside the hold is repaid from cash flow, and the resulting IRR is
+  reported as undefined if the cash flows change sign more than once.
+- The static cap-rate spread assumes cap rates move one-for-one with the Treasury; historically the
+  beta is lower, so the absolute hurdle (not the rank order) is sensitive to the Treasury input.
+- The two ranking endpoints differ: `/rank` uses one flat user hurdle (and the PDF/PPTX exports use
+  it too); `/rank/risk-adjusted` uses sub-class hurdles, gates and preferences.
+- `lease_expiration_month` is stored and shown but not used by the annual model.
+- There is no authentication.

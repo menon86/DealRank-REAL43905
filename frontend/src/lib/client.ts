@@ -58,6 +58,10 @@ const DEAL_DECIMAL_FIELDS: (keyof DealOut)[] = [
   "interest_rate",
   "exit_cap_rate",
   "selling_costs_rate",
+  "other_income_growth_rate",
+  "credit_loss_rate",
+  "management_fee_rate",
+  "replacement_reserve_per_unit_or_bed",
 ];
 
 const CASH_FLOW_DECIMAL_FIELDS: (keyof AnnualCashFlowOut)[] = [
@@ -77,6 +81,11 @@ const CASH_FLOW_DECIMAL_FIELDS: (keyof AnnualCashFlowOut)[] = [
   "senior_debt_service",
   "balloon_payment",
   "preferred_distribution",
+  "preferred_shortfall",
+  "preferred_accrued",
+  "credit_loss",
+  "management_fee",
+  "replacement_reserves",
 ];
 
 const LAYER_DECIMAL_FIELDS: (keyof CapitalStackLayer)[] = [
@@ -109,6 +118,10 @@ const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
   "preferred_equity",
   "upfront_financing_costs",
   "preferred_equity_repayment",
+  "unlevered_irr_before_costs",
+  "min_dscr",
+  "debt_yield",
+  "unlevered_cash_yield",
 ];
 
 /** "0.0625" -> 0.0625; null passes through; numbers already-parsed pass through. */
@@ -133,6 +146,9 @@ function parseDealOut(raw: DealOut): DealOut {
     ...parsed,
     capital_stack: raw.capital_stack
       ? raw.capital_stack.map((layer) => parseFields(layer, LAYER_DECIMAL_FIELDS))
+      : null,
+    unit_mix: raw.unit_mix
+      ? raw.unit_mix.map((tier) => ({ ...tier, rent: toNumber(tier.rent) ?? 0 }))
       : null,
   };
 }
@@ -187,6 +203,7 @@ function parseRiskRanked(raw: RiskRankedDealOut): RiskRankedDealOut {
     hurdle: parseHurdle(raw.hurdle),
     spread: toNumber(raw.spread) ?? 0,
     ltv: toNumber(raw.ltv) ?? 0,
+    warnings: raw.warnings ?? [],
     factors: parseWeights(raw.factors),
     score: toNumber(raw.score) ?? 0,
   };

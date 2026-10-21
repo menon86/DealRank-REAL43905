@@ -13,12 +13,23 @@ quantity an unlevered IRR is comparable to. Using each deal's own
 sub-class hurdle is what makes student housing, garden and mid-rise deals
 comparable on one scale.
 
-The DSCR gate excludes under-covered deals from ranking entirely rather
-than blending DSCR into the score. Among the deals that pass, an optional
-preference layer blends three normalized factors (return, cash flow,
-safety) with user weights. Pure functions on Decimals — no DB, no HTTP.
+The spread is measured on the unlevered IRR *before* closing and selling
+costs, because the hurdle is a gross market return with no transaction
+costs (comparing it with a net IRR would penalize short holds).
 
-Levered IRR never appears here: leverage choice must not decide a ranking.
+The DSCR gate (lowest DSCR over the hold, so an interest-only start can't
+hide a later breach) and the optional debt-yield gate exclude deals from
+ranking entirely rather than blending them into the score. Among the deals
+that pass, an optional preference layer blends three factors (return,
+cash flow, safety) with user weights. Each factor is scaled against fixed
+anchors, not against the other candidates, so a deal's score does not
+change when another deal is added to or removed from the comparison.
+Pure functions on Decimals — no DB, no HTTP.
+
+Levered IRR never appears here, and the return and cash-flow factors are
+unlevered. The safety factor is deliberately leverage-aware (DSCR and
+leverage are what it measures), so a non-zero risk weight lets financing
+choices move the order; with risk weight 0 it cannot.
 """
 
 from __future__ import annotations
@@ -49,9 +60,16 @@ class RiskAdjustedHurdle:
         return self.cap_rate + self.noi_growth
 
 
-def passes_dscr_gate(year_one_dscr: Decimal | None, minimum: Decimal) -> bool:
-    """None means no debt service (all-cash), which has nothing to fail."""
-    return year_one_dscr is None or year_one_dscr >= minimum
+def passes_dscr_gate(min_dscr: Decimal | None, minimum: Decimal) -> bool:
+    """`min_dscr` is the lowest DSCR over the hold. None means no debt
+    service (all-cash), which has nothing to fail."""
+    return min_dscr is None or min_dscr >= minimum
+
+
+def passes_debt_yield_gate(debt_yield: Decimal | None, minimum: Decimal | None) -> bool:
+    """Year-one NOI over total debt. None means no debt; a None minimum
+    means the gate is off."""
+    return minimum is None or debt_yield is None or debt_yield >= minimum
 
 
 # ---------------------------------------------------------------- preferences
@@ -122,10 +140,10 @@ class Candidate:
     """One gate-passing deal's inputs to the preference score."""
 
     key: str
-    spread: Decimal  # unlevered IRR - risk-adjusted hurdle
-    cash_on_cash: Decimal | None
-    year_one_dscr: Decimal | None
-    ltv: Decimal  # loan / purchase price
+    spread: Decimal  # unlevered IRR before costs - risk-adjusted hurdle
+    cash_yield: Decimal  # year-one NOI / (price + closing costs)
+    min_dscr: Decimal | None  # lowest DSCR over the hold; None = no debt
+    leverage: Decimal  # (all debt + preferred equity) / purchase price
 
 
 @dataclass(frozen=True)
@@ -142,40 +160,35 @@ class ScoredCandidate:
     score: Decimal
 
 
-def _min_max(values: list[Decimal]) -> list[Decimal]:
-    """Scales to 0..1 across the candidate set. When every deal ties, no
-    deal is advantaged, so all get the neutral 0.5.
-    """
-    low, high = min(values), max(values)
-    if high == low:
-        return [Decimal("0.5")] * len(values)
-    return [(v - low) / (high - low) for v in values]
+# (floor, ceiling): a value at or below the floor scores 0, at or above the
+# ceiling scores 1, linear between.
+SPREAD_ANCHORS = (Decimal("-0.03"), Decimal("0.05"))
+CASH_YIELD_ANCHORS = (Decimal("0.03"), Decimal("0.08"))
+DSCR_ANCHORS = (Decimal("1.0"), Decimal("2.0"))
+EQUITY_SHARE_ANCHORS = (Decimal("0.2"), Decimal("0.6"))  # 1 - leverage
 
 
-def _safety_raw(c: Candidate) -> tuple[Decimal, Decimal]:
-    dscr = ALL_CASH_DSCR_CAP if c.year_one_dscr is None else min(c.year_one_dscr, ALL_CASH_DSCR_CAP)
-    return dscr, 1 - c.ltv
+def _scale(value: Decimal, anchors: tuple[Decimal, Decimal]) -> Decimal:
+    low, high = anchors
+    return max(Decimal(0), min(Decimal(1), (value - low) / (high - low)))
 
 
 def score_candidates(candidates: list[Candidate], weights: Weights) -> list[ScoredCandidate]:
-    """Blends the three factors, each min-max normalized across the
-    candidates: return = spread vs hurdle; cash flow = year-one
-    cash-on-cash; risk = the mean of normalized DSCR and normalized
-    (1 - LTV), so more coverage and less leverage both score as safer.
+    """Blends the three factors against fixed anchors: return = spread vs
+    hurdle; cash flow = unlevered year-one cash yield; risk = the mean of
+    scaled DSCR and scaled (1 - leverage), so more coverage and less
+    leverage both score as safer. All-cash counts as maximum coverage.
     Output is in input order; callers sort.
     """
-    if not candidates:
-        return []
     w = weights.normalized()
-    irr_n = _min_max([c.spread for c in candidates])
-    coc_n = _min_max([c.cash_on_cash or Decimal(0) for c in candidates])
-    dscr_n = _min_max([_safety_raw(c)[0] for c in candidates])
-    ltv_n = _min_max([_safety_raw(c)[1] for c in candidates])
-
     scored = []
-    for i, c in enumerate(candidates):
-        risk_n = (dscr_n[i] + ltv_n[i]) / 2
-        factors = FactorScores(irr=irr_n[i], cash_flow=coc_n[i], risk=risk_n)
+    for c in candidates:
+        dscr = ALL_CASH_DSCR_CAP if c.min_dscr is None else c.min_dscr
+        factors = FactorScores(
+            irr=_scale(c.spread, SPREAD_ANCHORS),
+            cash_flow=_scale(c.cash_yield, CASH_YIELD_ANCHORS),
+            risk=(_scale(dscr, DSCR_ANCHORS) + _scale(1 - c.leverage, EQUITY_SHARE_ANCHORS)) / 2,
+        )
         score = w.irr * factors.irr + w.cash_flow * factors.cash_flow + w.risk * factors.risk
         scored.append(ScoredCandidate(key=c.key, factors=factors, score=score))
     return scored

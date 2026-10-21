@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,10 @@ def _column_values(payload: DealBase) -> dict:
     a JSON column, so it's dumped in JSON mode (Decimals as strings,
     enums as their values); every other field keeps its Python type.
     """
-    values = payload.model_dump(exclude={"capital_stack"})
+    values = payload.model_dump(exclude={"capital_stack", "unit_mix"})
+    values["unit_mix"] = (
+        None if payload.unit_mix is None else [t.model_dump(mode="json") for t in payload.unit_mix]
+    )
     values["capital_stack"] = (
         None
         if payload.capital_stack is None
@@ -46,8 +49,13 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db)) -> Deal:
 
 
 @router.get("", response_model=list[DealOut])
-def list_deals(db: Session = Depends(get_db)) -> list[Deal]:
-    return list(db.execute(select(Deal).order_by(Deal.created_at)).scalars())
+def list_deals(
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[Deal]:
+    stmt = select(Deal).order_by(Deal.created_at, Deal.id).limit(limit).offset(offset)
+    return list(db.execute(stmt).scalars())
 
 
 @router.get("/{deal_id}", response_model=DealOut)

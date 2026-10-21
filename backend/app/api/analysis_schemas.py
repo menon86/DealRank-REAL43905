@@ -59,6 +59,8 @@ class QuestionnaireIn(BaseModel):
 class RiskRankRequest(BaseModel):
     deal_ids: list[uuid.UUID] = Field(min_length=1, max_length=25)
     dscr_minimum: Decimal = Field(default=DEFAULT_DSCR_MINIMUM, ge=0, le=5)
+    # Optional gate: year-one NOI / total debt. Off by default.
+    debt_yield_minimum: Decimal | None = Field(default=None, ge=0, le=1)
     # Optional manual 10-Year Treasury (decimal fraction); default is live FRED.
     treasury_yield: Decimal | None = Field(default=None, ge=0, le=1)
     # Preferences: explicit weights win over questionnaire answers; with
@@ -85,7 +87,8 @@ class RiskRankedDealOut(BaseModel):
     metrics: MetricsOut
     hurdle: HurdleOut
     spread: Decimal
-    ltv: Decimal
+    ltv: Decimal  # all debt / purchase price
+    warnings: list[str] = []
     factors: FactorScoresOut
     score: Decimal
 
@@ -138,6 +141,7 @@ class MonteCarloRequest(BaseModel):
     exit_cap_sd: Decimal = Field(default=Decimal("0.005"), ge=0, le=Decimal("0.05"))
     rent_growth_sd: Decimal = Field(default=Decimal("0.01"), ge=0, le=Decimal("0.1"))
     vacancy_sd: Decimal = Field(default=Decimal("0.02"), ge=0, le=Decimal("0.2"))
+    exit_cap_rent_growth_correlation: Decimal = Field(default=Decimal("-0.3"), ge=-1, le=1)
     hurdle: Decimal | None = None  # default: the deal's risk-adjusted hurdle
     dscr_minimum: Decimal = Field(default=DEFAULT_DSCR_MINIMUM, ge=0, le=5)
 
@@ -161,7 +165,7 @@ class HistogramBinOut(BaseModel):
 class MonteCarloResponse(BaseModel):
     simulations: int
     converged: int
-    seed: int | None
+    seed: int  # always set: the one supplied, or the one drawn (re-send it to reproduce)
     hurdle: Decimal | None
     hurdle_source: str
     unlevered_irr: DistributionOut | None

@@ -35,6 +35,10 @@ interface FormState {
   monthly_rent_per_bed: string;
   vacancy_rate_pct: string;
   other_income_annual: string;
+  other_income_growth_rate_pct: string;
+  credit_loss_rate_pct: string;
+  management_fee_rate_pct: string;
+  replacement_reserve_per_unit_or_bed: string;
   opex_annual: string;
   expense_growth_rate_pct: string;
   rent_growth_rate_pct: string;
@@ -59,12 +63,10 @@ interface FormState {
   storage_monthly_fee: string;
   pet_monthly_fee: string;
   pet_penetration_pct: string;
-  rubs_recovery_pct: string;
 
   // Student Housing specific
   tech_package_monthly_fee: string;
   furniture_package_monthly_fee: string;
-  parental_guaranty_rate_pct: string;
 
   // Urban Mid-Rise specific
   garage_parking_stalls: string;
@@ -91,6 +93,10 @@ const DEFAULTS: FormState = {
   monthly_rent_per_bed: "",
   vacancy_rate_pct: "5",
   other_income_annual: "48000",
+  other_income_growth_rate_pct: "0",
+  credit_loss_rate_pct: "0",
+  management_fee_rate_pct: "0",
+  replacement_reserve_per_unit_or_bed: "0",
   opex_annual: "650000",
   expense_growth_rate_pct: "3",
   rent_growth_rate_pct: "3",
@@ -112,11 +118,9 @@ const DEFAULTS: FormState = {
   storage_monthly_fee: "65",
   pet_monthly_fee: "35",
   pet_penetration_pct: "35",
-  rubs_recovery_pct: "75",
 
   tech_package_monthly_fee: "55",
   furniture_package_monthly_fee: "40",
-  parental_guaranty_rate_pct: "90",
 
   garage_parking_stalls: "110",
   garage_monthly_rate: "150",
@@ -151,6 +155,10 @@ function dealToFormState(deal: DealOut): FormState {
     monthly_rent_per_bed: deal.monthly_rent_per_bed?.toString() ?? "",
     vacancy_rate_pct: fractionToPercentInput(deal.vacancy_rate),
     other_income_annual: deal.other_income_annual.toString(),
+    other_income_growth_rate_pct: fractionToPercentInput(deal.other_income_growth_rate),
+    credit_loss_rate_pct: fractionToPercentInput(deal.credit_loss_rate),
+    management_fee_rate_pct: fractionToPercentInput(deal.management_fee_rate),
+    replacement_reserve_per_unit_or_bed: deal.replacement_reserve_per_unit_or_bed.toString(),
     opex_annual: deal.opex_annual.toString(),
     expense_growth_rate_pct: fractionToPercentInput(deal.expense_growth_rate),
     rent_growth_rate_pct: fractionToPercentInput(deal.rent_growth_rate),
@@ -220,6 +228,57 @@ function layersFromFinancingCsv(data: Record<string, string>, current: LayerForm
 
 type FieldErrors = Partial<Record<keyof FormState, string>>;
 
+/** Ancillary-income inputs that can't be negative, and the ones that are percentages. */
+const ANCILLARY_AMOUNTS: (keyof FormState)[] = [
+  "surface_parking_stalls",
+  "covered_parking_stalls",
+  "parking_monthly_rate",
+  "storage_units",
+  "storage_monthly_fee",
+  "pet_monthly_fee",
+  "tech_package_monthly_fee",
+  "furniture_package_monthly_fee",
+  "garage_parking_stalls",
+  "garage_monthly_rate",
+  "commercial_retail_sqft",
+  "commercial_rent_sqft_annual",
+];
+const ANCILLARY_PERCENTS: (keyof FormState)[] = ["parking_occupancy_pct", "pet_penetration_pct"];
+
+/** Negative or out-of-range entries in the unit mix and the ancillary-income helpers. */
+function validateExtras(form: FormState, unitMix: UnitMixTier[]): string[] {
+  const problems: string[] = [];
+  for (const key of ANCILLARY_AMOUNTS) {
+    const value = parseNumber(form[key] as string);
+    if (!isBlank(form[key] as string) && (value === null || value < 0)) {
+      problems.push(`${key.replace(/_/g, " ")} can't be negative.`);
+    }
+  }
+  for (const key of ANCILLARY_PERCENTS) {
+    const value = parseNumber(form[key] as string);
+    if (!isBlank(form[key] as string) && (value === null || value < 0 || value > 100)) {
+      problems.push(`${key.replace(/_/g, " ")} must be between 0 and 100.`);
+    }
+  }
+  for (const tier of unitMix) {
+    for (const [label, raw] of [
+      ["units", tier.units],
+      ["avg sq ft", tier.avgSqFt],
+      ["rent", tier.rent],
+    ] as const) {
+      const value = parseNumber(raw);
+      if (value === null || value < 0) {
+        problems.push(`Unit mix "${tier.name}": ${label} can't be negative.`);
+      }
+    }
+    const beds = parseNumber(tier.bedsPerUnit);
+    if (beds === null || beds < 1) {
+      problems.push(`Unit mix "${tier.name}": beds per unit must be at least 1.`);
+    }
+  }
+  return problems;
+}
+
 function isBlank(value: string): boolean {
   return value.trim() === "";
 }
@@ -264,8 +323,24 @@ function validate(form: FormState): FieldErrors {
   if (opex === null || opex < 0) errors.opex_annual = "Enter a non-negative amount.";
 
   const expenseGrowth = parseNumber(form.expense_growth_rate_pct);
-  if (expenseGrowth === null || expenseGrowth <= -100 || expenseGrowth > 100) {
-    errors.expense_growth_rate_pct = "Enter a percentage above -100 and up to 100.";
+  if (expenseGrowth === null || expenseGrowth < 0 || expenseGrowth > 100) {
+    errors.expense_growth_rate_pct = "Enter a percentage from 0 to 100.";
+  }
+  const otherGrowth = parseNumber(form.other_income_growth_rate_pct);
+  if (otherGrowth === null || otherGrowth <= -100 || otherGrowth > 100) {
+    errors.other_income_growth_rate_pct = "Enter a percentage above -100 and up to 100.";
+  }
+  const creditLoss = parseNumber(form.credit_loss_rate_pct);
+  if (creditLoss === null || creditLoss < 0 || creditLoss > 100) {
+    errors.credit_loss_rate_pct = "Enter a percentage between 0 and 100.";
+  }
+  const mgmtFee = parseNumber(form.management_fee_rate_pct);
+  if (mgmtFee === null || mgmtFee < 0 || mgmtFee > 100) {
+    errors.management_fee_rate_pct = "Enter a percentage between 0 and 100.";
+  }
+  const reserve = parseNumber(form.replacement_reserve_per_unit_or_bed);
+  if (reserve === null || reserve < 0) {
+    errors.replacement_reserve_per_unit_or_bed = "Enter a non-negative amount.";
   }
   const rentGrowth = parseNumber(form.rent_growth_rate_pct);
   if (rentGrowth === null || rentGrowth <= -100 || rentGrowth > 100) {
@@ -323,7 +398,18 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [unitMix, setUnitMix] = useState<UnitMixTier[]>(DEFAULT_UNIT_MIX);
+  const [unitMix, setUnitMix] = useState<UnitMixTier[]>(
+    initial?.unit_mix
+      ? initial.unit_mix.map((t) => ({
+          id: t.id,
+          name: t.name,
+          units: t.units.toString(),
+          bedsPerUnit: t.beds_per_unit.toString(),
+          avgSqFt: t.avg_sqft.toString(),
+          rent: t.rent.toString(),
+        }))
+      : DEFAULT_UNIT_MIX,
+  );
   const [showUnitMix, setShowUnitMix] = useState<boolean>(true);
   const [importNotice, setImportNotice] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [layers, setLayers] = useState<LayerForm[]>(() => initialLayers(initial, defaultLayers));
@@ -377,11 +463,11 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   function syncUnitMixToDeal() {
     if (form.leasing_mode === "per_unit") {
       set("unit_count", totalMixUnits.toString());
-      set("monthly_rent_per_unit", Math.round(weightedAvgRentPerUnit).toString());
+      set("monthly_rent_per_unit", weightedAvgRentPerUnit.toFixed(2));
     } else {
       set("bed_count", totalMixBeds.toString());
       const avgRentPerBed = totalMixBeds > 0 ? totalMonthlyGpr / totalMixBeds : 0;
-      set("monthly_rent_per_bed", Math.round(avgRentPerBed).toString());
+      set("monthly_rent_per_bed", avgRentPerBed.toFixed(2));
     }
     setImportNotice({
       message: `Synchronized unit mix: ${totalMixUnits} units (${totalMixBeds} beds) at $${Math.round(weightedAvgRentPerUnit)}/mo average into deal GPR.`,
@@ -569,6 +655,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       try {
         const text = e.target?.result as string;
         const { data, mixRows } = parseCsvText(text);
+        if (Object.keys(data).length === 0 && mixRows.length === 0) {
+          throw new Error("no recognizable rows");
+        }
 
         if (data.deal_name || data.name) set("name", data.deal_name || data.name);
         if (data.sub_asset_class && ["student_housing", "suburban_garden", "urban_midrise"].includes(data.sub_asset_class)) {
@@ -590,7 +679,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           setUnitMix(mixRows);
           const unitsSum = mixRows.reduce((acc, r) => acc + (Number(r.units) || 0), 0);
           const gprSum = mixRows.reduce((acc, r) => acc + (Number(r.units) || 0) * (Number(r.rent) || 0), 0);
-          const avgRent = unitsSum > 0 ? Math.round(gprSum / unitsSum) : 0;
+          const avgRent = unitsSum > 0 ? Number((gprSum / unitsSum).toFixed(2)) : 0;
           set("unit_count", unitsSum.toString());
           set("monthly_rent_per_unit", avgRent.toString());
         }
@@ -615,6 +704,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       try {
         const text = e.target?.result as string;
         const { data } = parseCsvText(text);
+        if (Object.keys(data).length === 0) throw new Error("no recognizable rows");
         updateLayers(layersFromFinancingCsv(data, layers));
 
         setImportNotice({
@@ -643,7 +733,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       layerErrors.push("The senior loan can't exceed the purchase price.");
     }
     setStackErrors(layerErrors);
-    if (Object.keys(errors).length > 0 || layerErrors.length > 0) return;
+    const extraErrors = validateExtras(form, unitMix);
+    setSubmitError(extraErrors.length > 0 ? extraErrors.join(" ") : null);
+    if (Object.keys(errors).length > 0 || layerErrors.length > 0 || extraErrors.length > 0) return;
 
     // The backend overwrites loan_amount / interest_rate /
     // amortization_years from the senior layer; send the same values so
@@ -667,6 +759,18 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       monthly_rent_per_bed: isPerUnit ? null : Number(form.monthly_rent_per_bed),
       vacancy_rate: percentInputToFraction(form.vacancy_rate_pct),
       other_income_annual: Number(form.other_income_annual) || 0,
+      other_income_growth_rate: percentInputToFraction(form.other_income_growth_rate_pct),
+      credit_loss_rate: percentInputToFraction(form.credit_loss_rate_pct),
+      management_fee_rate: percentInputToFraction(form.management_fee_rate_pct),
+      replacement_reserve_per_unit_or_bed: Number(form.replacement_reserve_per_unit_or_bed) || 0,
+      unit_mix: unitMix.map((t) => ({
+        id: t.id,
+        name: t.name,
+        units: Math.round(Number(t.units) || 0),
+        beds_per_unit: Math.max(1, Math.round(Number(t.bedsPerUnit) || 1)),
+        avg_sqft: Math.round(Number(t.avgSqFt) || 0),
+        rent: Number(t.rent) || 0,
+      })),
       opex_annual: Number(form.opex_annual) || 0,
       expense_growth_rate: percentInputToFraction(form.expense_growth_rate_pct),
       rent_growth_rate: percentInputToFraction(form.rent_growth_rate_pct),
@@ -712,7 +816,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="file"
             ref={underwritingFileInputRef}
             style={{ display: "none" }}
-            accept=".csv,.tsv,.xlsx"
+            accept=".csv,.tsv"
             onChange={(e) => {
               if (e.target.files?.[0]) handleUnderwritingFile(e.target.files[0]);
             }}
@@ -729,7 +833,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             type="file"
             ref={financingFileInputRef}
             style={{ display: "none" }}
-            accept=".csv,.tsv,.xlsx"
+            accept=".csv,.tsv"
             onChange={(e) => {
               if (e.target.files?.[0]) handleFinancingFile(e.target.files[0]);
             }}
@@ -844,6 +948,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 <label>Parking Occupancy (%)</label>
                 <input
                   type="number"
+                  min="0"
                   value={form.parking_occupancy_pct}
                   onChange={(e) => set("parking_occupancy_pct", e.target.value)}
                 />
@@ -873,6 +978,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 <label>Pet Penetration Rate (%)</label>
                 <input
                   type="number"
+                  min="0"
                   value={form.pet_penetration_pct}
                   onChange={(e) => set("pet_penetration_pct", e.target.value)}
                 />
@@ -908,14 +1014,6 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 <NumberInput
                   value={form.furniture_package_monthly_fee}
                   onChange={(v) => set("furniture_package_monthly_fee", v)}
-                />
-              </div>
-              <div className="field">
-                <label>Parental Guaranty Rate (%)</label>
-                <input
-                  type="number"
-                  value={form.parental_guaranty_rate_pct}
-                  onChange={(e) => set("parental_guaranty_rate_pct", e.target.value)}
                 />
               </div>
             </div>
@@ -1023,6 +1121,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                       <td>
                         <input
                           type="number"
+                          min="1"
                           value={row.bedsPerUnit}
                           onChange={(e) => updateUnitMixRow(row.id, "bedsPerUnit", e.target.value)}
                         />
@@ -1154,6 +1253,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <input
             id="vacancy_rate_pct"
             type="number"
+            min="0"
             step="0.1"
             value={form.vacancy_rate_pct}
             onChange={(e) => set("vacancy_rate_pct", e.target.value)}
@@ -1170,6 +1270,51 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             aria-invalid={!!fieldErrors.other_income_annual}
           />
           {fieldError("other_income_annual")}
+        </div>
+        <div className="field">
+          <label htmlFor="other_income_growth_rate_pct">Other income growth (%/yr)</label>
+          <input
+            id="other_income_growth_rate_pct"
+            type="number"
+            step="any"
+            value={form.other_income_growth_rate_pct}
+            onChange={(e) => set("other_income_growth_rate_pct", e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="credit_loss_rate_pct">Bad debt &amp; concessions (% of GPR)</label>
+          <input
+            id="credit_loss_rate_pct"
+            type="number"
+            min="0"
+            step="any"
+            value={form.credit_loss_rate_pct}
+            onChange={(e) => set("credit_loss_rate_pct", e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="management_fee_rate_pct">Management fee (% of EGI)</label>
+          <input
+            id="management_fee_rate_pct"
+            type="number"
+            min="0"
+            step="any"
+            value={form.management_fee_rate_pct}
+            onChange={(e) => set("management_fee_rate_pct", e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="replacement_reserve_per_unit_or_bed">
+            Replacement reserve / {isPerUnit ? "unit" : "bed"} / yr ($, below NOI)
+          </label>
+          <input
+            id="replacement_reserve_per_unit_or_bed"
+            type="number"
+            min="0"
+            step="any"
+            value={form.replacement_reserve_per_unit_or_bed}
+            onChange={(e) => set("replacement_reserve_per_unit_or_bed", e.target.value)}
+          />
         </div>
       </div>
 
@@ -1190,6 +1335,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <input
             id="expense_growth_rate_pct"
             type="number"
+            min="0"
             step="0.1"
             value={form.expense_growth_rate_pct}
             onChange={(e) => set("expense_growth_rate_pct", e.target.value)}
@@ -1210,7 +1356,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           {fieldError("rent_growth_rate_pct")}
         </div>
         <div className="field">
-          <label htmlFor="lease_expiration_month">Lease expiration month (1–12)</label>
+          <label htmlFor="lease_expiration_month">Lease expiration month (1–12, display only)</label>
           <input
             id="lease_expiration_month"
             type="number"
@@ -1239,6 +1385,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <input
             id="annual_turnover_rate_pct"
             type="number"
+            min="0"
             step="0.1"
             value={form.annual_turnover_rate_pct}
             onChange={(e) => set("annual_turnover_rate_pct", e.target.value)}
@@ -1288,6 +1435,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <input
             id="hold_period_years"
             type="number"
+            min="0"
             value={form.hold_period_years}
             onChange={(e) => set("hold_period_years", e.target.value)}
             aria-invalid={!!fieldErrors.hold_period_years}
@@ -1299,6 +1447,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <input
             id="exit_cap_rate_pct"
             type="number"
+            min="0"
             step="0.01"
             value={form.exit_cap_rate_pct}
             onChange={(e) => set("exit_cap_rate_pct", e.target.value)}
@@ -1311,6 +1460,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <input
             id="selling_costs_rate_pct"
             type="number"
+            min="0"
             step="0.1"
             value={form.selling_costs_rate_pct}
             onChange={(e) => set("selling_costs_rate_pct", e.target.value)}

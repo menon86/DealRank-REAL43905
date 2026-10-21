@@ -18,11 +18,20 @@ from app.engine.types import DealInputs, DealMetrics
 from app.engine.waterfall import WaterfallResult, project
 
 
+def _sign_changes(cash_flows: list[Decimal]) -> int:
+    signs = [cf > 0 for cf in cash_flows if cf != 0]
+    return sum(1 for a, b in zip(signs, signs[1:], strict=False) if a != b)
+
+
 def _irr(cash_flows: list[Decimal]) -> Decimal | None:
     """Wraps numpy-financial's IRR, converting to/from Decimal only here.
     Returns None rather than raising when the solver doesn't converge
     (numpy-financial returns nan in that case).
     """
+    if _sign_changes(cash_flows) > 1:
+        # Several sign changes (e.g. a balloon repaid out of operating cash
+        # flow) can have several IRRs; reporting one would be arbitrary.
+        return None
     float_flows = [float(cf) for cf in cash_flows]
     try:
         result = npf.irr(float_flows)
@@ -71,7 +80,9 @@ def compute(deal: DealInputs) -> DealMetrics:
     # Combined DSCR: NOI over every debt layer. Senior: the senior loan only.
     year_one_dscr = dscr(year_one.noi, year_one.debt_service)
     year_one_senior_dscr = dscr(year_one.noi, year_one.senior_debt_service)
-    cash_on_cash = (year_one.levered_cash_flow / equity) if equity != 0 else None
+    # Equity at or below zero (debt covers the whole cost) has no meaningful
+    # cash-on-cash or multiple: the signs would flip.
+    cash_on_cash = (year_one.levered_cash_flow / equity) if equity > 0 else None
 
     # Levered stream: initial equity outlay, then each year's levered cash
     # flow, with the final year's net sale proceeds (post debt payoff)
@@ -89,11 +100,21 @@ def compute(deal: DealInputs) -> DealMetrics:
     unlevered_stream[-1] += unlevered_exit_proceeds
     unlevered_irr = _irr(unlevered_stream)
 
+    # The same stream before closing and selling costs. The risk-adjusted
+    # hurdle (Treasury + cap spread + growth) is a gross market return with
+    # no transaction costs, so ranking compares against this one.
+    gross_stream = [-deal.purchase_price] + [cf.unlevered_cash_flow for cf in flows]
+    gross_stream[-1] += result.exit_value
+    unlevered_irr_before_costs = _irr(gross_stream)
+
+    debt_total = total_debt(deal)
+    ratios = [cf.noi / cf.debt_service for cf in flows if cf.debt_service != 0]
+
     # Total distributions to equity: every year's levered cash flow plus
     # the net sale proceeds at exit.
     total_levered_cf = sum((cf.levered_cash_flow for cf in flows), Decimal("0"))
     total_distributions = total_levered_cf + result.net_sale_proceeds
-    equity_multiple = total_distributions / equity if equity != 0 else None
+    equity_multiple = total_distributions / equity if equity > 0 else None
 
     return DealMetrics(
         annual_cash_flows=flows,
@@ -116,4 +137,8 @@ def compute(deal: DealInputs) -> DealMetrics:
         preferred_equity=total_preferred_equity(deal),
         upfront_financing_costs=upfront_financing_costs(deal),
         preferred_equity_repayment=result.preferred_equity_repayment,
+        unlevered_irr_before_costs=unlevered_irr_before_costs,
+        min_dscr=min(ratios) if ratios else None,
+        debt_yield=(year_one.noi / debt_total) if debt_total > 0 else None,
+        unlevered_cash_yield=year_one.noi / (deal.purchase_price + deal.closing_costs),
     )

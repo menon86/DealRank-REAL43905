@@ -17,7 +17,7 @@ class MarketRent(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String(100), nullable=False)
-    geography: Mapped[str] = mapped_column(String(255), nullable=False)
+    geography: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     sub_asset_class: Mapped[str] = mapped_column(String(50), nullable=False)
     period: Mapped[Date] = mapped_column(Date, nullable=False)
     median_rent: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)

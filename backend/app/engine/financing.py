@@ -68,6 +68,35 @@ def annual_preferred_distribution(deal: DealInputs) -> Decimal:
     )
 
 
+# A deal whose debt and preferred equity cover (nearly) the whole cost has no
+# real common equity: cash-on-cash, the multiple and levered IRR stop meaning
+# anything, so the API rejects it.
+MIN_COMMON_EQUITY_SHARE = Decimal("0.05")
+
+
+def common_equity_errors(
+    purchase_price: Decimal,
+    closing_costs: Decimal,
+    layers: tuple[FinancingLayer, ...] | list[FinancingLayer],
+) -> list[str]:
+    """Rule: common equity (price + closing + upfront financing costs - all
+    debt - preferred equity) must be at least MIN_COMMON_EQUITY_SHARE of
+    that total cost.
+    """
+    debt = sum((layer.amount for layer in layers if layer.is_debt), Decimal("0"))
+    preferred = sum((layer.amount for layer in layers if layer.is_preferred_equity), Decimal("0"))
+    upfront = sum((layer.upfront_cost for layer in layers), Decimal("0"))
+    total_cost = purchase_price + closing_costs + upfront
+    equity = total_cost - debt - preferred
+    if equity < total_cost * MIN_COMMON_EQUITY_SHARE:
+        return [
+            f"Debt and preferred equity total {debt + preferred:,.0f} against a total cost of "
+            f"{total_cost:,.0f}; common equity must be at least "
+            f"{MIN_COMMON_EQUITY_SHARE:.0%} of total cost."
+        ]
+    return []
+
+
 def validate_capital_stack(layers: tuple[FinancingLayer, ...] | list[FinancingLayer]) -> list[str]:
     """Returns every rule the stack breaks (empty list = valid). Shared by
     DealInputs and the API schema so both reject the same stacks.

@@ -15,9 +15,10 @@ app = FastAPI(title=settings.APP_NAME, version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
+    # Only the configured origins (CORS_ORIGINS), not every *.onrender.com
+    # site. The API uses no cookies, so credentials stay off.
     allow_origins=settings.cors_origins_list,
-    allow_origin_regex=r"https://.*\.onrender\.com",
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

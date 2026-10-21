@@ -35,7 +35,12 @@ class TreasuryQuote:
     source: str  # "fred" | "treasury" | "fallback" | "override"
 
 
+# A failed lookup is remembered briefly so an outage costs one 5-second
+# timeout per minute, not one per request.
+FAILURE_BACKOFF_SECONDS = 60
+
 _cache: tuple[float, TreasuryQuote] | None = None
+_last_failure: float | None = None
 
 
 def parse_fred_csv(text: str) -> TreasuryQuote:
@@ -75,11 +80,14 @@ def _fetch(url: str, parse) -> TreasuryQuote:
 
 
 def get_treasury_10y(*, use_cache: bool = True) -> TreasuryQuote:
-    global _cache
+    global _cache, _last_failure
     now = time.monotonic()
     if use_cache and _cache is not None and now - _cache[0] < CACHE_TTL_SECONDS:
         return _cache[1]
     settings = get_settings()
+    fallback = TreasuryQuote(yield_=settings.TREASURY_10Y_FALLBACK, as_of=None, source="fallback")
+    if use_cache and _last_failure is not None and now - _last_failure < FAILURE_BACKOFF_SECONDS:
+        return fallback
     today = date.today()
     # Previous month too: the current month's feed is empty on the first days of a month.
     prior = (today.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
@@ -92,9 +100,13 @@ def get_treasury_10y(*, use_cache: bool = True) -> TreasuryQuote:
         except (httpx.HTTPError, ValueError, ArithmeticError, ET.ParseError) as exc:
             logger.warning("Treasury yield lookup failed for %s: %r", url, exc)
             continue
+        _last_failure = None
         _cache = (now, quote)
         return quote
-    return TreasuryQuote(yield_=settings.TREASURY_10Y_FALLBACK, as_of=None, source="fallback")
+    # Every source failed: remember it briefly so an outage doesn't cost a
+    # timeout per source on every request.
+    _last_failure = now
+    return fallback
 
 
 def override_quote(yield_: Decimal) -> TreasuryQuote:
@@ -102,5 +114,6 @@ def override_quote(yield_: Decimal) -> TreasuryQuote:
 
 
 def clear_cache() -> None:
-    global _cache
+    global _cache, _last_failure
     _cache = None
+    _last_failure = None

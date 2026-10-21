@@ -14,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from app.api.converters import engine_layer
 from app.api.ranking_data import RANKING_BASIS_NOTE
-from app.engine.financing import validate_capital_stack
-from app.engine.types import LayerGroup, LayerType, RateType
+from app.engine.financing import common_equity_errors, validate_capital_stack
+from app.engine.types import FinancingLayer, LayerGroup, LayerType, RateType
 from app.models.deal import LeasingMode, SubAssetClass
 
 DealName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
@@ -51,21 +51,31 @@ class CapitalStackLayer(BaseModel):
     preferred_return: Decimal | None = Field(default=None, ge=0, le=1)
 
 
+class UnitMixTier(BaseModel):
+    id: Annotated[str, StringConstraints(max_length=50)]
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+    units: int = Field(ge=0)
+    beds_per_unit: int = Field(ge=1, le=20)
+    avg_sqft: int = Field(ge=0)
+    rent: Decimal = Field(ge=0)
+
+
 class DealBase(BaseModel):
     name: DealName
     sub_asset_class: SubAssetClass
     leasing_mode: LeasingMode
 
     unit_count: int | None = Field(default=None, gt=0)
-    monthly_rent_per_unit: Decimal | None = Field(default=None, ge=0)
+    monthly_rent_per_unit: Decimal | None = Field(default=None, gt=0)
     bed_count: int | None = Field(default=None, gt=0)
-    monthly_rent_per_bed: Decimal | None = Field(default=None, ge=0)
+    monthly_rent_per_bed: Decimal | None = Field(default=None, gt=0)
 
     vacancy_rate: Decimal = Field(ge=0, le=1)
     other_income_annual: Decimal = Field(default=Decimal("0"), ge=0)
 
     opex_annual: Decimal = Field(ge=0)
-    expense_growth_rate: Decimal = Field(gt=-1, le=1)
+    # Expenses don't shrink; rent growth may be negative (a declining market).
+    expense_growth_rate: Decimal = Field(ge=0, le=1)
     rent_growth_rate: Decimal = Field(gt=-1, le=1)
 
     lease_expiration_month: int = Field(default=8, ge=1, le=12)
@@ -87,6 +97,16 @@ class DealBase(BaseModel):
     # _capital_stack_rules), so they always describe the senior loan.
     capital_stack: list[CapitalStackLayer] | None = Field(default=None, max_length=20)
 
+    # Optional lines; 0 reproduces the original model.
+    other_income_growth_rate: Decimal = Field(default=Decimal("0"), gt=-1, le=1)
+    credit_loss_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    management_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    replacement_reserve_per_unit_or_bed: Decimal = Field(default=Decimal("0"), ge=0)
+
+    # The unit mix the aggregate unit/bed count and rent were built from.
+    # Descriptive only: the engine runs on the aggregates.
+    unit_mix: list[UnitMixTier] | None = Field(default=None, max_length=20)
+
     @model_validator(mode="after")
     def _capital_stack_rules(self) -> "DealBase":
         """Checks the stack against validate_capital_stack, then mirrors the
@@ -98,6 +118,8 @@ class DealBase(BaseModel):
             return self
         layers = [engine_layer(layer.model_dump()) for layer in self.capital_stack]
         errors = validate_capital_stack(layers)
+        if not errors:
+            errors = common_equity_errors(self.purchase_price, self.closing_costs, layers)
         if errors:
             raise ValueError("capital_stack: " + " ".join(errors))
 
@@ -121,6 +143,20 @@ class DealBase(BaseModel):
         """
         if self.loan_amount > self.purchase_price:
             raise ValueError("loan_amount cannot exceed purchase_price")
+        if not self.capital_stack:
+            errors = common_equity_errors(
+                self.purchase_price,
+                self.closing_costs,
+                [
+                    FinancingLayer(
+                        layer_type=LayerType.OTHER_SENIOR,
+                        amount=self.loan_amount,
+                        interest_rate=self.interest_rate,
+                    )
+                ],
+            )
+            if errors:
+                raise ValueError(errors[0])
         if self.leasing_mode is LeasingMode.PER_UNIT:
             if self.unit_count is None or self.monthly_rent_per_unit is None:
                 raise ValueError(
@@ -184,6 +220,11 @@ class DealUpdate(BaseModel):
     amortization_years: int | None = None
     # Explicit null clears the stack and returns the deal to the single loan.
     capital_stack: list[CapitalStackLayer] | None = None
+    unit_mix: list[UnitMixTier] | None = None
+    other_income_growth_rate: Decimal | None = None
+    credit_loss_rate: Decimal | None = None
+    management_fee_rate: Decimal | None = None
+    replacement_reserve_per_unit_or_bed: Decimal | None = None
 
     hold_period_years: int | None = None
     exit_cap_rate: Decimal | None = None
@@ -221,6 +262,11 @@ class AnnualCashFlowOut(BaseModel):
     senior_debt_service: Decimal
     balloon_payment: Decimal
     preferred_distribution: Decimal
+    preferred_shortfall: Decimal
+    preferred_accrued: Decimal
+    credit_loss: Decimal
+    management_fee: Decimal
+    replacement_reserves: Decimal
 
 
 class MetricsOut(BaseModel):
@@ -247,6 +293,10 @@ class MetricsOut(BaseModel):
     preferred_equity: Decimal
     upfront_financing_costs: Decimal
     preferred_equity_repayment: Decimal
+    unlevered_irr_before_costs: Decimal | None
+    min_dscr: Decimal | None
+    debt_yield: Decimal | None
+    unlevered_cash_yield: Decimal
 
 
 class RankRequest(BaseModel):

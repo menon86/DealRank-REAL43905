@@ -59,24 +59,24 @@ class Deal(Base):
     bed_count: Mapped[int | None] = mapped_column(nullable=True)
     monthly_rent_per_bed: Mapped[Numeric | None] = mapped_column(Numeric(12, 2), nullable=True)
 
-    vacancy_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
+    vacancy_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
     other_income_annual: Mapped[Numeric] = mapped_column(Numeric(14, 2), nullable=False, default=0)
 
     # --- OpEx ---
     opex_annual: Mapped[Numeric] = mapped_column(Numeric(14, 2), nullable=False)
-    expense_growth_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
-    rent_growth_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
+    expense_growth_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
+    rent_growth_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
 
     # --- Turnover / make-ready (own visible OpEx line; see app/engine) ---
     lease_expiration_month: Mapped[int] = mapped_column(nullable=False, default=8)
     turnover_cost_per_unit_or_bed: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)
-    annual_turnover_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
+    annual_turnover_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
 
     # --- Acquisition / financing ---
     purchase_price: Mapped[Numeric] = mapped_column(Numeric(14, 2), nullable=False)
     closing_costs: Mapped[Numeric] = mapped_column(Numeric(14, 2), nullable=False)
     loan_amount: Mapped[Numeric] = mapped_column(Numeric(14, 2), nullable=False)
-    interest_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
+    interest_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
     amortization_years: Mapped[int] = mapped_column(nullable=False)
     # Capital stack layers as JSON (see app/api/schemas.py FinancingLayer).
     # NULL = the single loan described by the three columns above. When
@@ -84,10 +84,26 @@ class Deal(Base):
     # so anything reading them (LTV, reports) still sees the senior loan.
     capital_stack: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # --- Optional lines (0 = off) ---
+    other_income_growth_rate: Mapped[Numeric] = mapped_column(
+        Numeric(8, 6), nullable=False, default=0, server_default="0"
+    )
+    credit_loss_rate: Mapped[Numeric] = mapped_column(
+        Numeric(8, 6), nullable=False, default=0, server_default="0"
+    )
+    management_fee_rate: Mapped[Numeric] = mapped_column(
+        Numeric(8, 6), nullable=False, default=0, server_default="0"
+    )
+    replacement_reserve_per_unit_or_bed: Mapped[Numeric] = mapped_column(
+        Numeric(12, 2), nullable=False, default=0, server_default="0"
+    )
+    # Descriptive unit mix tiers the aggregates were built from (not used by the engine).
+    unit_mix: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # --- Hold / exit ---
     hold_period_years: Mapped[int] = mapped_column(nullable=False)
-    exit_cap_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
-    selling_costs_rate: Mapped[Numeric] = mapped_column(Numeric(6, 4), nullable=False)
+    exit_cap_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
+    selling_costs_rate: Mapped[Numeric] = mapped_column(Numeric(8, 6), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
