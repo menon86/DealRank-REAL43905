@@ -24,17 +24,36 @@ const ROWS: ProjectionRow[] = [
     kind: "deduction",
   },
   { label: "NOI", value: (cf) => formatMoney(cf.noi), kind: "subtotal" },
-  { label: "Debt service", value: (cf) => formatMoney(cf.debt_service), kind: "deduction" },
+  {
+    label: "Debt service (all debt)",
+    value: (cf) => formatMoney(cf.debt_service),
+    kind: "deduction",
+  },
+  {
+    label: "Preferred return",
+    value: (cf) => formatMoney(cf.preferred_distribution),
+    kind: "deduction",
+  },
+  {
+    label: "Balloon repayment",
+    value: (cf) => formatMoney(cf.balloon_payment),
+    kind: "deduction",
+  },
   {
     label: "Levered cash flow",
     value: (cf) => formatMoney(cf.levered_cash_flow),
     kind: "subtotal",
   },
   {
-    label: "DSCR",
+    label: "Senior DSCR",
+    value: (cf) =>
+      cf.senior_debt_service === 0 ? "—" : formatNumber(cf.noi / cf.senior_debt_service),
+  },
+  {
+    label: "Combined DSCR",
     value: (cf) => (cf.debt_service === 0 ? "—" : formatNumber(cf.noi / cf.debt_service)),
   },
-  { label: "Loan balance (year end)", value: (cf) => formatMoney(cf.ending_loan_balance) },
+  { label: "Debt balance (year end)", value: (cf) => formatMoney(cf.ending_loan_balance) },
 ];
 
 /**

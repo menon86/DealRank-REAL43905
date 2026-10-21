@@ -16,6 +16,7 @@
 
 import type {
   AnnualCashFlowOut,
+  CapitalStackLayer,
   DealCreate,
   DealOut,
   DealUpdate,
@@ -73,6 +74,19 @@ const CASH_FLOW_DECIMAL_FIELDS: (keyof AnnualCashFlowOut)[] = [
   "ending_loan_balance",
   "levered_cash_flow",
   "unlevered_cash_flow",
+  "senior_debt_service",
+  "balloon_payment",
+  "preferred_distribution",
+];
+
+const LAYER_DECIMAL_FIELDS: (keyof CapitalStackLayer)[] = [
+  "amount",
+  "interest_rate",
+  "index_rate",
+  "spread",
+  "rate_cap_cost",
+  "origination_fee_rate",
+  "preferred_return",
 ];
 
 const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
@@ -90,6 +104,11 @@ const METRICS_DECIMAL_FIELDS: (keyof MetricsOut)[] = [
   "forward_noi",
   "selling_costs",
   "loan_balance_at_exit",
+  "year_one_senior_dscr",
+  "total_debt",
+  "preferred_equity",
+  "upfront_financing_costs",
+  "preferred_equity_repayment",
 ];
 
 /** "0.0625" -> 0.0625; null passes through; numbers already-parsed pass through. */
@@ -109,7 +128,13 @@ function parseFields<T extends object>(raw: T, fields: (keyof T)[]): T {
 }
 
 function parseDealOut(raw: DealOut): DealOut {
-  return parseFields(raw, DEAL_DECIMAL_FIELDS);
+  const parsed = parseFields(raw, DEAL_DECIMAL_FIELDS);
+  return {
+    ...parsed,
+    capital_stack: raw.capital_stack
+      ? raw.capital_stack.map((layer) => parseFields(layer, LAYER_DECIMAL_FIELDS))
+      : null,
+  };
 }
 
 function parseAnnualCashFlowOut(raw: AnnualCashFlowOut): AnnualCashFlowOut {

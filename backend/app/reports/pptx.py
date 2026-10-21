@@ -14,6 +14,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 from app.api.ranking_data import RANKING_BASIS_NOTE, RankedEntry
+from app.reports.capital_stack import CAPITAL_STACK_HEADERS, capital_stack_rows
 from app.reports.formatting import money, multiple, number, percent
 
 _PRIMARY = RGBColor(0x1F, 0x4B, 0x99)
@@ -85,18 +86,19 @@ def _add_comparison_slide(prs: Presentation, entries: list[RankedEntry]) -> None
         ("Less: operating expenses", lambda e: money(_year_one(e).opex)),
         ("Less: turnover expense", lambda e: money(_year_one(e).turnover_expense)),
         ("Year 1 NOI", lambda e: money(e.metrics.year_one_noi)),
-        ("Debt service", lambda e: money(_year_one(e).debt_service)),
+        ("Debt service (all debt)", lambda e: money(_year_one(e).debt_service)),
         (_RANKING_BASIS_LABEL, lambda e: percent(e.metrics.unlevered_irr)),
         ("Levered IRR (reference)", lambda e: percent(e.metrics.levered_irr)),
         ("Going-in cap rate", lambda e: percent(e.metrics.going_in_cap_rate)),
-        ("Year 1 DSCR", lambda e: number(e.metrics.year_one_dscr)),
+        ("Year 1 senior DSCR", lambda e: number(e.metrics.year_one_senior_dscr)),
+        ("Year 1 combined DSCR", lambda e: number(e.metrics.year_one_dscr)),
         ("Equity invested", lambda e: money(e.metrics.equity_invested)),
         ("Cash-on-cash", lambda e: percent(e.metrics.cash_on_cash)),
         ("Equity multiple", lambda e: multiple(e.metrics.equity_multiple)),
     ]
 
-    # 16 rows x 0.34" from 0.95" leaves room for a two-line header row
-    # (long deal names at 5 columns) inside the 7.5" slide.
+    # 17 rows x 0.34" from 0.95" (ending ~6.7") leaves room for a two-line
+    # header row (long deal names at 5 columns) inside the 7.5" slide.
     rows = 1 + len(labels_and_values)
     cols = 1 + len(entries)
     table_shape = slide.shapes.add_table(
@@ -222,6 +224,34 @@ def _add_assumptions_slide(prs: Presentation, entry: RankedEntry) -> None:
     _style_table(table, header_row=False, font_size=9)
 
 
+def _add_capital_stack_slide(prs: Presentation, entry: RankedEntry) -> None:
+    slide = _new_content_slide(prs, f"Capital stack — {entry.deal.name}")
+    body = capital_stack_rows(entry.deal, entry.metrics)
+
+    # At most 20 layers + header + residual row: 0.3" rows from 0.95"
+    # stay on the slide up to ~21 rows, so shrink rows for big stacks.
+    rows = 1 + len(body)
+    row_height = min(Inches(0.36), int(Inches(6.3) / rows))
+    table_shape = slide.shapes.add_table(
+        rows, len(CAPITAL_STACK_HEADERS), Inches(0.4), Inches(0.95), Inches(9.2), row_height * rows
+    )
+    table = table_shape.table
+    for col, header in enumerate(CAPITAL_STACK_HEADERS):
+        table.cell(0, col).text = header
+    for row, cells in enumerate(body, start=1):
+        for col, value in enumerate(cells):
+            table.cell(row, col).text = value
+    for col, width in enumerate((2.3, 1.1, 1.3, 0.9, 1.6, 2.0)):
+        table.columns[col].width = Inches(width)
+    for row in range(rows):
+        for col in (2, 3):
+            table.cell(row, col).text_frame.paragraphs[0].alignment = PP_ALIGN.RIGHT
+    _style_table(table, font_size=9)
+    for cell in table.rows[rows - 1].cells:
+        for paragraph in cell.text_frame.paragraphs:
+            paragraph.font.bold = True
+
+
 def build_pptx_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
     prs = Presentation()
     prs.slide_width = Inches(10)
@@ -232,6 +262,7 @@ def build_pptx_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
     _add_ranking_slide(prs, entries)
     for entry in entries:
         _add_assumptions_slide(prs, entry)
+        _add_capital_stack_slide(prs, entry)
 
     buffer = io.BytesIO()
     prs.save(buffer)
