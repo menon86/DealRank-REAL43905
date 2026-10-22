@@ -25,26 +25,6 @@ TREASURY = "0.046"
 
 
 @pytest.fixture()
-def spreads(db_session):
-    for cls, bps, growth in [
-        ("student_housing", 130, "0.0200"),
-        ("suburban_garden", 61, "0.0140"),
-        ("urban_midrise", 60, "0.0140"),
-    ]:
-        db_session.add(
-            CapRateSpread(
-                sub_asset_class=cls,
-                survey_source="test survey",
-                survey_quarter="2026H1",
-                spread_bps=bps,
-                assumed_stabilized_noi_growth=Decimal(growth),
-                effective_date=date(2026, 8, 12),
-            )
-        )
-    db_session.flush()
-
-
-@pytest.fixture()
 def deal_ids(client, spreads):
     return [
         client.post("/deals", json=p).json()["id"]

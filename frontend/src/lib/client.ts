@@ -435,9 +435,9 @@ const REPORT_FILENAMES: Record<"pdf" | "pptx", string> = {
 export async function downloadReport(
   kind: "pdf" | "pptx",
   dealIds: string[],
-  hurdleRate: number,
+  basis: number | RiskReportParams,
 ): Promise<void> {
-  const url = buildReportUrl(kind, dealIds, hurdleRate);
+  const url = buildReportUrl(kind, dealIds, basis);
   const res = await fetch(url);
   if (!res.ok) {
     throw new ApiError("GET", `/reports/${kind}`, res.status, await res.text());
@@ -457,14 +457,42 @@ export async function downloadReport(
   setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
-/** The report endpoint URL for a given selection and hurdle rate. */
+/**
+ * What a risk-adjusted report is built from: the same inputs as the
+ * risk-adjusted ranking view, so the export matches what is on screen.
+ */
+export interface RiskReportParams {
+  dscrMinimum: number;
+  treasuryYield: number | null;
+  weights: Weights | null;
+  answers: RiskRankRequest["answers"];
+}
+
+/**
+ * The report endpoint URL for a given selection. A number is a flat hurdle
+ * rate (the original report); RiskReportParams gives the risk-adjusted one.
+ */
 export function buildReportUrl(
   kind: "pdf" | "pptx",
   dealIds: string[],
-  hurdleRate: number,
+  basis: number | RiskReportParams,
 ): string {
   const params = new URLSearchParams();
   for (const id of dealIds) params.append("deal_ids", id);
-  params.set("hurdle_rate", String(hurdleRate));
+  if (typeof basis === "number") {
+    params.set("hurdle_rate", String(basis));
+  } else {
+    params.set("dscr_minimum", String(basis.dscrMinimum));
+    if (basis.treasuryYield !== null) params.set("treasury_yield", String(basis.treasuryYield));
+    if (basis.weights) {
+      params.set("weight_irr", String(basis.weights.irr));
+      params.set("weight_cash_flow", String(basis.weights.cash_flow));
+      params.set("weight_risk", String(basis.weights.risk));
+    } else if (basis.answers) {
+      params.set("primary_goal", basis.answers.primary_goal);
+      params.set("risk_tolerance", String(basis.answers.risk_tolerance));
+      params.set("income_need", String(basis.answers.income_need));
+    }
+  }
   return `${API_BASE_URL}/reports/${kind}?${params.toString()}`;
 }

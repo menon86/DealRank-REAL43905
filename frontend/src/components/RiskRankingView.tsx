@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ReportDownloads } from "./ReportDownloads";
 import * as client from "../lib/client";
 import { formatMultiple, formatPercent, percentInputToFraction } from "../lib/format";
 import type { PrimaryGoal, Questionnaire, RiskRankResponse, Weights } from "../lib/types";
@@ -118,6 +119,15 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
             mid-rise and student housing compare on one scale.
           </p>
         </div>
+        <ReportDownloads
+          dealIds={selectedDealIds}
+          risk={{
+            dscrMinimum: Number.isFinite(dscrMinimum) ? dscrMinimum : 1.25,
+            treasuryYield: treasuryOverride,
+            weights: mode === "manual" ? manualWeights : null,
+            answers: mode === "questionnaire" ? answers : null,
+          }}
+        />
       </div>
 
       <section className="methodology-panel">

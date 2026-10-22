@@ -353,7 +353,10 @@ before closing and selling costs, the basis the hurdle is quoted on.
   reported as undefined if the cash flows change sign more than once.
 - The static cap-rate spread assumes cap rates move one-for-one with the Treasury; historically the
   beta is lower, so the absolute hurdle (not the rank order) is sensitive to the Treasury input.
-- The two ranking endpoints differ: `/rank` uses one flat user hurdle (and the PDF/PPTX exports use
-  it too); `/rank/risk-adjusted` uses sub-class hurdles, gates and preferences.
+- The two ranking endpoints differ: `/rank` uses one flat user hurdle; `/rank/risk-adjusted` uses
+  sub-class hurdles, gates and preferences. The PDF/PPTX exports default to the risk-adjusted
+  ranking (same computation as the endpoint) and show how each hurdle was built; passing
+  `hurdle_rate` still produces the flat-hurdle report, which the Comparison and Ranking tabs use.
+  See `docs/source-memo.md` for every data input and its date.
 - `lease_expiration_month` is stored and shown but not used by the annual model.
 - There is no authentication.
