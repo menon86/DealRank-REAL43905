@@ -40,6 +40,8 @@ export type LayerType =
   | "all_cash"
   | "other_equity";
 export type RateType = "fixed" | "floating";
+/** What repaying a loan at the sale, before it matures, costs. */
+export type PrepaymentType = "none" | "step_down" | "yield_maintenance" | "defeasance";
 
 /**
  * One capital stack layer (backend/app/api/schemas.py CapitalStackLayer).
@@ -64,6 +66,14 @@ export interface CapitalStackLayer {
   rate_cap_cost: number;
   origination_fee_rate: number;
   preferred_return: number | null;
+  prepayment_type: PrepaymentType;
+  /** Step-down: share of the balance by loan year, year 1 first. */
+  prepayment_schedule: number[];
+  /** Yield maintenance / defeasance: Treasury yield to discount at. */
+  prepayment_treasury_rate: number | null;
+  /** FHA mortgage insurance (HUD loans): annual on the balance, and upfront. */
+  mip_annual_rate: number;
+  mip_upfront_rate: number;
 }
 
 export interface UnitMixTierApi {
@@ -157,6 +167,8 @@ export interface AnnualCashFlowOut {
   management_fee: number;
   /** Paid below NOI: NOI, cap rate and DSCR are before reserves. */
   replacement_reserves: number;
+  /** FHA mortgage insurance; already inside debt_service. */
+  mortgage_insurance: number;
 }
 
 export interface MetricsOut {
@@ -190,6 +202,8 @@ export interface MetricsOut {
   /** Origination fees and rate caps, paid at closing out of equity. */
   upfront_financing_costs: number;
   preferred_equity_repayment: number;
+  /** Prepayment penalties on loans repaid at the sale before maturity. */
+  prepayment_penalties: number;
   /** Unlevered IRR before closing and selling costs: the basis the risk-adjusted hurdle uses. */
   unlevered_irr_before_costs: number | null;
   /** Lowest combined DSCR over the hold; null when there is no debt. */

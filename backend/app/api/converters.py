@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from app.engine.types import DealInputs, FinancingLayer, LayerType, RateType
+from app.engine.types import DealInputs, FinancingLayer, LayerType, PrepaymentType, RateType
 from app.engine.types import LeasingMode as EngineLeasingMode
 from app.engine.types import SubAssetClass as EngineSubAssetClass
 from app.models.deal import Deal
@@ -41,6 +41,11 @@ def engine_layer(data: dict[str, Any]) -> FinancingLayer:
         rate_cap_cost=_decimal(data.get("rate_cap_cost")) or Decimal("0"),
         origination_fee_rate=_decimal(data.get("origination_fee_rate")) or Decimal("0"),
         preferred_return=_decimal(data.get("preferred_return")),
+        prepayment_type=PrepaymentType(data.get("prepayment_type") or PrepaymentType.NONE),
+        prepayment_schedule=tuple(_decimal(rate) for rate in data.get("prepayment_schedule") or []),
+        prepayment_treasury_rate=_decimal(data.get("prepayment_treasury_rate")),
+        mip_annual_rate=_decimal(data.get("mip_annual_rate")) or Decimal("0"),
+        mip_upfront_rate=_decimal(data.get("mip_upfront_rate")) or Decimal("0"),
     )
 
 

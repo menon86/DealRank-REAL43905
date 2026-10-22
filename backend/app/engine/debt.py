@@ -9,6 +9,11 @@ curve), an optional interest-only period, then level amortization over
 the remaining amortization period (amortization years − I/O months, per
 TASK.md section 4), and an optional maturity. A loan maturing inside the
 hold is repaid as a balloon that month; no refinancing is modeled.
+
+HUD loans add the FHA mortgage insurance premium (annual rate on the
+outstanding balance, paid monthly) to debt service. A loan repaid at the
+sale before it matures pays its prepayment penalty — step-down, yield
+maintenance or defeasance — out of the sale proceeds.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.engine.financing import MONTHS_PER_YEAR, debt_layers
-from app.engine.types import DealInputs, FinancingLayer, LayerGroup
+from app.engine.types import DealInputs, FinancingLayer, LayerGroup, PrepaymentType
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,8 @@ class AnnualDebtService:
     debt_service: Decimal
     ending_balance: Decimal
     balloon_payment: Decimal = Decimal("0")
+    # FHA mortgage insurance; included in debt_service.
+    mortgage_insurance: Decimal = Decimal("0")
 
 
 def _level_payment(principal: Decimal, annual_interest_rate: Decimal, n_payments: int) -> Decimal:
@@ -52,68 +59,162 @@ def monthly_payment(
     return _level_payment(loan_amount, annual_interest_rate, amortization_years * MONTHS_PER_YEAR)
 
 
-def layer_schedule(layer: FinancingLayer, hold_period_years: int) -> list[AnnualDebtService]:
-    """Annual debt service, interest/principal split, balloon and ending
-    balance for one debt layer, for each year of the hold, built by
-    simulating the monthly schedule and aggregating.
+@dataclass(frozen=True)
+class _Month:
+    interest: Decimal
+    principal: Decimal
+    mortgage_insurance: Decimal
+    balloon: Decimal
+    opening_balance: Decimal
+    ending_balance: Decimal
+
+
+def _simulate(layer: FinancingLayer, months: int, maturity_month: int | None) -> list[_Month]:
+    """The layer month by month: interest-only, then level amortization;
+    FHA mortgage insurance on the opening balance; and, at maturity_month,
+    the remaining balance repaid as a balloon.
     """
     annual_rate = layer.all_in_rate
     monthly_rate = annual_rate / MONTHS_PER_YEAR
-    maturity_month = layer.term_years * MONTHS_PER_YEAR if layer.term_years is not None else None
-    if maturity_month is not None and maturity_month >= hold_period_years * MONTHS_PER_YEAR:
-        # Matures at (or after) the exit: the sale repays it, so it's in
-        # the exit's loan payoff, not a balloon out of operating cash flow.
-        maturity_month = None
+    monthly_mip = layer.mip_annual_rate / MONTHS_PER_YEAR
 
-    schedule: list[AnnualDebtService] = []
+    rows: list[_Month] = []
     balance = layer.amount
     payment: Decimal | None = None
 
+    for month in range(1, months + 1):
+        if balance <= 0:
+            zero = Decimal("0")
+            rows.append(_Month(zero, zero, zero, zero, zero, zero))
+            continue
+        opening = balance
+        interest = balance * monthly_rate
+        mip = balance * monthly_mip
+
+        amortizing = layer.amortization_years is not None and month > layer.io_months
+        if amortizing:
+            if payment is None:
+                # Solved once, on the balance at the end of I/O, over the
+                # months of amortization left after it.
+                remaining = layer.amortization_years * MONTHS_PER_YEAR - layer.io_months
+                payment = _level_payment(balance, annual_rate, remaining)
+            principal = payment - interest
+            if principal > balance:
+                # Final payment: don't overpay past a zero balance.
+                principal = balance
+        else:
+            principal = Decimal("0")
+
+        balance -= principal
+        balloon = Decimal("0")
+        if month == maturity_month and balance > 0:
+            balloon = balance
+            balance = Decimal("0")
+        rows.append(_Month(interest, principal, mip, balloon, opening, balance))
+
+    return rows
+
+
+def _maturity_month(layer: FinancingLayer) -> int | None:
+    return layer.term_years * MONTHS_PER_YEAR if layer.term_years is not None else None
+
+
+def layer_schedule(layer: FinancingLayer, hold_period_years: int) -> list[AnnualDebtService]:
+    """Annual debt service (interest + principal + mortgage insurance),
+    balloon and ending balance for one debt layer, for each year of the
+    hold, built by simulating the monthly schedule and aggregating.
+    """
+    hold_months = hold_period_years * MONTHS_PER_YEAR
+    maturity_month = _maturity_month(layer)
+    if maturity_month is not None and maturity_month >= hold_months:
+        # Matures at (or after) the exit: the sale repays it, so it's in
+        # the exit's loan payoff, not a balloon out of operating cash flow.
+        maturity_month = None
+    rows = _simulate(layer, hold_months, maturity_month)
+
+    schedule: list[AnnualDebtService] = []
     for year in range(1, hold_period_years + 1):
-        year_interest = Decimal("0")
-        year_principal = Decimal("0")
-        year_balloon = Decimal("0")
-
-        for month_of_year in range(1, MONTHS_PER_YEAR + 1):
-            if balance <= 0:
-                break
-            month = (year - 1) * MONTHS_PER_YEAR + month_of_year
-            interest = balance * monthly_rate
-
-            amortizing = layer.amortization_years is not None and month > layer.io_months
-            if amortizing:
-                if payment is None:
-                    # Solved once, on the balance at the end of I/O, over
-                    # the months of amortization left after it.
-                    remaining = layer.amortization_years * MONTHS_PER_YEAR - layer.io_months
-                    payment = _level_payment(balance, annual_rate, remaining)
-                principal = payment - interest
-                if principal > balance:
-                    # Final payment: don't overpay past a zero balance.
-                    principal = balance
-            else:
-                principal = Decimal("0")
-
-            balance -= principal
-            year_interest += interest
-            year_principal += principal
-
-            if month == maturity_month and balance > 0:
-                year_balloon += balance
-                balance = Decimal("0")
-
+        months = rows[(year - 1) * MONTHS_PER_YEAR : year * MONTHS_PER_YEAR]
+        interest = sum((m.interest for m in months), Decimal("0"))
+        principal = sum((m.principal for m in months), Decimal("0"))
+        mip = sum((m.mortgage_insurance for m in months), Decimal("0"))
         schedule.append(
             AnnualDebtService(
                 year=year,
-                interest_paid=year_interest,
-                principal_paid=year_principal,
-                debt_service=year_interest + year_principal,
-                ending_balance=balance,
-                balloon_payment=year_balloon,
+                interest_paid=interest,
+                principal_paid=principal,
+                debt_service=interest + principal + mip,
+                ending_balance=months[-1].ending_balance,
+                balloon_payment=sum((m.balloon for m in months), Decimal("0")),
+                mortgage_insurance=mip,
             )
         )
 
     return schedule
+
+
+# Yield maintenance is never less than this share of the balance prepaid.
+YIELD_MAINTENANCE_FLOOR = Decimal("0.01")
+
+
+def prepayment_penalty(layer: FinancingLayer, hold_period_years: int) -> Decimal:
+    """What repaying this layer at the sale (end of the hold) costs, on top
+    of its balance. Zero for a loan already repaid or matured, and for
+    yield maintenance / defeasance once the exit is at or past maturity.
+    """
+    if not layer.is_debt or layer.prepayment_type is PrepaymentType.NONE:
+        return Decimal("0")
+
+    exit_month = hold_period_years * MONTHS_PER_YEAR
+    maturity_month = _maturity_month(layer)
+    if maturity_month is not None and maturity_month <= exit_month:
+        return Decimal("0")
+
+    if layer.prepayment_type is PrepaymentType.STEP_DOWN:
+        balance = _simulate(layer, exit_month, None)[-1].ending_balance
+        # The sale closes in the last month of loan year N (= the hold).
+        schedule = layer.prepayment_schedule
+        rate = schedule[hold_period_years - 1] if hold_period_years <= len(schedule) else 0
+        return balance * Decimal(rate)
+
+    # Yield maintenance and defeasance price the payments the lender would
+    # have received from the exit to maturity, discounted at Treasury.
+    rows = _simulate(layer, maturity_month, maturity_month)
+    balance = rows[exit_month - 1].ending_balance
+    if balance <= 0:
+        return Decimal("0")
+    treasury = layer.prepayment_treasury_rate or Decimal("0")
+    monthly_treasury = treasury / MONTHS_PER_YEAR
+    remaining = rows[exit_month:]
+
+    def discount(months_out: int) -> Decimal:
+        return (1 + monthly_treasury) ** months_out
+
+    if layer.prepayment_type is PrepaymentType.YIELD_MAINTENANCE:
+        spread = (layer.all_in_rate - treasury) / MONTHS_PER_YEAR
+        lost_interest = sum(
+            (m.opening_balance * spread / discount(i) for i, m in enumerate(remaining, start=1)),
+            Decimal("0"),
+        )
+        return max(lost_interest, balance * YIELD_MAINTENANCE_FLOOR)
+
+    # DEFEASANCE: buy Treasuries that pay every remaining payment and the
+    # balloon; the cost above the balance retired is the penalty.
+    replacement = sum(
+        (
+            (m.interest + m.principal + m.balloon) / discount(i)
+            for i, m in enumerate(remaining, start=1)
+        ),
+        Decimal("0"),
+    )
+    return max(replacement - balance, Decimal("0"))
+
+
+def stack_prepayment_penalties(deal: DealInputs) -> Decimal:
+    return sum(
+        (prepayment_penalty(layer, deal.hold_period_years) for layer in debt_layers(deal)),
+        Decimal("0"),
+    )
 
 
 @dataclass(frozen=True)
@@ -153,6 +254,7 @@ def stack_schedule(deal: DealInputs) -> list[StackDebtYear]:
                     debt_service=sum((r.debt_service for r in rows), Decimal("0")),
                     ending_balance=sum((r.ending_balance for r in rows), Decimal("0")),
                     balloon_payment=sum((r.balloon_payment for r in rows), Decimal("0")),
+                    mortgage_insurance=sum((r.mortgage_insurance for r in rows), Decimal("0")),
                 ),
                 senior_debt_service=senior,
             )

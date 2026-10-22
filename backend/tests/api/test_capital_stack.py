@@ -210,3 +210,61 @@ def test_rates_keep_sub_basis_point_precision(client):
     fetched = client.get(f"/deals/{created['id']}").json()
     assert Decimal(fetched["interest_rate"]) == Decimal("0.061250")
     assert Decimal(fetched["exit_cap_rate"]) == Decimal("0.051250")
+
+
+HUD_STACK = [
+    {
+        "type": "hud_223f",
+        "amount": "18000000",
+        "interest_rate": "0.0575",
+        "amortization_years": 35,
+        "term_years": 35,
+        "mip_annual_rate": "0.0025",
+        "mip_upfront_rate": "0.0025",
+        "prepayment_type": "step_down",
+        "prepayment_schedule": ["0.10", "0.09", "0.08", "0.07", "0.06", "0.05", "0.04"],
+    },
+    {"type": "sponsor_gp", "amount": "11376000"},
+]
+
+
+def test_hud_insurance_and_prepayment_round_trip_and_reach_the_metrics(client):
+    resp = _create(client, capital_stack=HUD_STACK)
+    assert resp.status_code == 201, resp.text
+    layer = client.get(f"/deals/{resp.json()['id']}").json()["capital_stack"][0]
+    assert layer["prepayment_type"] == "step_down"
+    assert [Decimal(r) for r in layer["prepayment_schedule"]][0] == Decimal("0.10")
+    assert Decimal(layer["mip_annual_rate"]) == Decimal("0.0025")
+
+    metrics = client.get(f"/deals/{resp.json()['id']}/metrics").json()
+    assert Decimal(metrics["annual_cash_flows"][0]["mortgage_insurance"]) > 0
+    # Ten-year hold, seven-year schedule: no penalty left by the sale.
+    assert Decimal(metrics["prepayment_penalties"]) == 0
+    assert Decimal(metrics["upfront_financing_costs"]) == Decimal("45000")
+
+
+def test_yield_maintenance_penalty_reduces_sale_proceeds(client):
+    agency = {
+        "type": "agency_fannie_mae",
+        "amount": "18000000",
+        "interest_rate": "0.06",
+        "amortization_years": 30,
+        "term_years": 12,
+    }
+    plain_id = _create(client, capital_stack=[agency, STACK[3]]).json()["id"]
+    ym = {**agency, "prepayment_type": "yield_maintenance", "prepayment_treasury_rate": "0.04"}
+    ym_id = _create(client, capital_stack=[ym, STACK[3]]).json()["id"]
+
+    plain = client.get(f"/deals/{plain_id}/metrics").json()
+    metrics = client.get(f"/deals/{ym_id}/metrics").json()
+    penalty = Decimal(metrics["prepayment_penalties"])
+    assert penalty > 0
+    assert Decimal(metrics["net_sale_proceeds"]) == Decimal(plain["net_sale_proceeds"]) - penalty
+    assert metrics["unlevered_irr"] == plain["unlevered_irr"]
+
+
+def test_mortgage_insurance_on_a_non_hud_loan_is_a_422(client):
+    agency = {**STACK[0], "mip_annual_rate": "0.0025"}
+    resp = _create(client, capital_stack=[agency, STACK[3]])
+    assert resp.status_code == 422
+    assert "mortgage insurance applies only" in resp.text
