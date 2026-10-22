@@ -6,6 +6,8 @@ import { MarketCheckView } from "./components/MarketCheckView";
 import { RankingView } from "./components/RankingView";
 import { RiskRankingView } from "./components/RiskRankingView";
 import { SensitivityView } from "./components/SensitivityView";
+import { ChatPanel } from "./components/ChatPanel";
+import type { RankingSettings } from "./components/ChatPanel";
 import { Shell } from "./components/Shell";
 import type { Tab } from "./components/Shell";
 import * as client from "./lib/client";
@@ -28,6 +30,8 @@ export function App() {
   const [rankLoading, setRankLoading] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
   const [rankReloadKey, setRankReloadKey] = useState(0);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [riskSettings, setRiskSettings] = useState<RankingSettings>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -231,9 +235,23 @@ export function App() {
         />
       )}
 
-      {activeTab === "risk" && <RiskRankingView selectedDealIds={selectedIds} />}
+      {activeTab === "risk" && (
+        <RiskRankingView selectedDealIds={selectedIds} onSettingsChange={setRiskSettings} />
+      )}
       {activeTab === "sensitivity" && <SensitivityView deals={deals} />}
       {activeTab === "market" && <MarketCheckView deals={deals} />}
+
+      {!chatOpen && (
+        <button type="button" className="primary chat-launcher" onClick={() => setChatOpen(true)}>
+          Ask DealRank
+        </button>
+      )}
+      <ChatPanel
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        selectedDealIds={selectedIds}
+        rankingSettings={{ ...riskSettings, hurdle_rate: hurdleRate }}
+      />
     </Shell>
   );
 }

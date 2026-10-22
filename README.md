@@ -45,6 +45,18 @@ Full formulas and rationale live in the project spec (see team docs) and in
 | Frontend (`frontend/`) | Done — deal form, deal list, comparison table, ranking view, PDF/PPTX download buttons, wired to the real API |
 | Deploy (Render) | Config checked in ([`render.yaml`](render.yaml)); not yet deployed |
 
+## Chat assistant
+
+A read-only, tool-grounded chat drawer ("Ask DealRank") answers questions such as "why is Deal B
+ranked below Deal A?" or "which deals failed the DSCR gate?". The model never does math: it can only
+call read-only tools (`backend/app/api/chat_tools.py`) that wrap the deterministic engine, and it is
+told to quote their output. Tool calls are validated with Pydantic and limited to an allowlist.
+It talks to any OpenAI-compatible endpoint (Gemini free tier by default); set `LLM_BASE_URL`,
+`LLM_API_KEY` and `LLM_MODEL` in `backend/.env` (see `backend/.env.example`, including Groq,
+OpenRouter and Ollama examples). With no key, or when the provider is rate-limited or down, the UI
+falls back to deterministic preset questions (`GET /chat/suggestions`, `POST /chat/preset`).
+`POST /chat` is rate-limited per IP in memory (`CHAT_RATE_LIMIT_PER_MIN`, per process only).
+
 ## Scope
 
 **In scope (Deliverable 2 MVP - Completed):** multifamily residential assets — student housing, suburban garden, urban

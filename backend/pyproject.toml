@@ -20,6 +20,9 @@ dependencies = [
     "python-pptx>=1.0,<2.0",
     # Live 10-Year Treasury lookup (FRED public CSV) in app/services/treasury.py.
     "httpx>=0.27,<0.28",
+    # Chat assistant: the OpenAI client against any OpenAI-compatible endpoint
+    # (Gemini by default; Groq, OpenRouter, Ollama via env vars).
+    "openai>=1.50,<2.0",
 ]
 
 [project.optional-dependencies]

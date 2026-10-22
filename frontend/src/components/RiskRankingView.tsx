@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { RankingSettings } from "./ChatPanel";
 import { ReportDownloads } from "./ReportDownloads";
 import * as client from "../lib/client";
 import { formatMultiple, formatPercent, percentInputToFraction } from "../lib/format";
@@ -7,6 +8,8 @@ import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
 
 interface RiskRankingViewProps {
   selectedDealIds: string[];
+  // Reports the active settings so the chat assistant can default to them.
+  onSettingsChange?: (settings: RankingSettings) => void;
 }
 
 type PreferenceMode = "none" | "questionnaire" | "manual";
@@ -31,7 +34,7 @@ function signed(fraction: number): string {
   return `${fraction >= 0 ? "+" : ""}${formatPercent(fraction)}`;
 }
 
-export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
+export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRankingViewProps) {
   const [dscrInput, setDscrInput] = useState("1.25");
   const [treasuryInput, setTreasuryInput] = useState("");
   const [mode, setMode] = useState<PreferenceMode>("none");
@@ -98,6 +101,21 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
     reloadKey,
     inputsInvalid,
   ]);
+
+  // The effective weights come from the response, so questionnaire answers are reflected too.
+  const effectiveWeights = result?.weights;
+  const effectiveDscr = dscrMinimum;
+  const effectiveTreasury = treasuryOverride;
+  useEffect(() => {
+    if (!onSettingsChange) return;
+    const settings: RankingSettings = {};
+    if (Number.isFinite(effectiveDscr) && effectiveDscr >= 0) settings.dscr_minimum = effectiveDscr;
+    if (effectiveTreasury !== null && Number.isFinite(effectiveTreasury)) {
+      settings.treasury_yield = effectiveTreasury;
+    }
+    if (effectiveWeights) settings.weights = effectiveWeights;
+    onSettingsChange(settings);
+  }, [onSettingsChange, effectiveDscr, effectiveTreasury, effectiveWeights]);
 
   if (selectedDealIds.length === 0) {
     return (
@@ -299,8 +317,8 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
       )}
       {result?.treasury.source === "fallback" && (
         <div className="status-banner info" role="status">
-          Couldn&apos;t reach FRED or the US Treasury, so the hurdle uses a configured default Treasury yield. Enter an
-          override above to use today&apos;s figure.
+          Couldn&apos;t reach FRED or the US Treasury, so the hurdle uses a configured default
+          Treasury yield. Enter an override above to use today&apos;s figure.
         </div>
       )}
 
@@ -359,7 +377,9 @@ export function RiskRankingView({ selectedDealIds }: RiskRankingViewProps) {
                         </div>
                       ))}
                     </td>
-                    <td className="col-ranking-basis">{formatPercent(r.metrics.unlevered_irr_before_costs)}</td>
+                    <td className="col-ranking-basis">
+                      {formatPercent(r.metrics.unlevered_irr_before_costs)}
+                    </td>
                     <td
                       title={`${formatPercent(r.hurdle.treasury_yield)} Treasury + ${formatPercent(
                         r.hurdle.spread_bps / 10000,

@@ -51,3 +51,46 @@ def spreads(db_session):
             )
         )
     db_session.flush()
+
+
+# ---- shared by the chat tests (test_chat_*.py) ----
+
+CHAT_TREASURY = "0.046"
+
+
+@pytest.fixture()
+def chat_treasury(monkeypatch):
+    """Pins the Treasury lookup so no chat test touches the network. Returns a dict whose
+    "source" ("fred" = live, "fallback" = the labelled default) the test can change."""
+    from app.services.treasury import TreasuryQuote
+
+    state = {"source": "fred"}
+
+    def fake():
+        as_of = date(2026, 10, 1) if state["source"] != "fallback" else None
+        return TreasuryQuote(Decimal(CHAT_TREASURY), as_of, state["source"])
+
+    monkeypatch.setattr("app.api.risk_rank.get_treasury_10y", fake)
+    return state
+
+
+@pytest.fixture()
+def chat_deals(db_session, spreads, chat_treasury):
+    """The three seed deals (ORM rows) with cap-rate spreads loaded.
+    Hurdles at a 4.6% Treasury: student 7.90%, garden 6.61%, mid-rise 6.60%."""
+    from app.models.deal import Deal
+    from tests.api.payloads import (
+        STUDENT_HOUSING_PAYLOAD,
+        SUBURBAN_GARDEN_PAYLOAD,
+        URBAN_MIDRISE_PAYLOAD,
+    )
+
+    deals = {}
+    for payload in (STUDENT_HOUSING_PAYLOAD, SUBURBAN_GARDEN_PAYLOAD, URBAN_MIDRISE_PAYLOAD):
+        deal = Deal(**payload)
+        db_session.add(deal)
+        deals[payload["name"]] = deal
+    db_session.flush()
+    for deal in deals.values():
+        db_session.refresh(deal)  # coerce payload strings to enums/Decimals
+    return deals
