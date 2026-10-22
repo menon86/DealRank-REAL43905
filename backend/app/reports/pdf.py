@@ -22,6 +22,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     BaseDocTemplate,
+    Flowable,
     Frame,
     HRFlowable,
     KeepTogether,
@@ -35,7 +36,7 @@ from reportlab.platypus import (
 )
 
 from app.api.ranking_data import RankedEntry
-from app.reports import theme
+from app.reports import logo, theme
 from app.reports.assumptions import ASSUMPTION_GROUPS, format_assumption_value, present_rows
 from app.reports.capital_stack import CAPITAL_STACK_HEADERS, capital_stack_rows
 from app.reports.data import PerfPoint, ReportData
@@ -54,6 +55,7 @@ INK, PRIMARY, PRIMARY_MID, ACCENT = (
 )
 TINT, STRIPE, RULE, MUTED = _c(theme.TINT), _c(theme.STRIPE), _c(theme.RULE), _c(theme.MUTED)
 NEGATIVE, WHITE = _c(theme.NEGATIVE), _c(theme.WHITE)
+HIGHLIGHT = _c(theme.HIGHLIGHT)
 
 PAGE_W, PAGE_H = letter
 MARGIN = 0.6 * inch
@@ -108,17 +110,74 @@ _KPI_LABEL = _style("KpiLabel", fontSize=6.5, leading=8, textColor=MUTED, alignm
 # ---------------------------------------------------------------- page chrome
 
 
+def _draw_logo(canvas, x: float, y: float, size: float, dark: bool = False) -> float:
+    """The DealRank mark and wordmark with the mark's bottom-left at (x, y).
+    Returns the lockup's width."""
+    palette = logo.DARK if dark else logo.LIGHT
+    canvas.setFillColor(_c(palette.square))
+    canvas.roundRect(x, y, size, size, logo.MARK_RADIUS * size, stroke=0, fill=1)
+    for (left, height), color in zip(logo.BARS, palette.bars, strict=True):
+        canvas.setFillColor(_c(color))
+        canvas.roundRect(
+            x + left * size,
+            y + logo.BASELINE * size,
+            logo.BAR_WIDTH * size,
+            height * size,
+            logo.BAR_RADIUS * size,
+            stroke=0,
+            fill=1,
+        )
+    font_size = logo.WORD_SIZE * size
+    text_x = x + size * (1 + logo.WORD_GAP)
+    canvas.setFillColor(_c(palette.word))
+    canvas.setFont("Helvetica-Bold", font_size)
+    canvas.drawString(text_x, y + size / 2 - 0.36 * font_size, logo.WORDMARK)
+    return text_x + stringWidth(logo.WORDMARK, "Helvetica-Bold", font_size) - x
+
+
+def _draw_cover_art(canvas) -> None:
+    """The mark's bars, oversized and a shade off the cover colour, rising
+    from the right side of the cover band."""
+    size = 8.6 * inch  # makes the bar group about 3.4" wide
+    first = logo.BARS[0][0]
+    span = (logo.BARS[-1][0] - first + logo.BAR_WIDTH) * size
+    left = PAGE_W - 0.6 * inch - span
+    base = PAGE_H - _COVER_BAND + 0.55 * inch
+    for (bar_left, height), color in zip(logo.BARS, logo.ART_COLORS, strict=True):
+        canvas.setFillColor(_c(color))
+        canvas.roundRect(
+            left + (bar_left - first) * size,
+            base,
+            logo.BAR_WIDTH * size,
+            height * size,
+            logo.BAR_RADIUS * size,
+            stroke=0,
+            fill=1,
+        )
+
+
+class _Signoff(Flowable):
+    """The logo lockup as a flowable, for the close of the report."""
+
+    def __init__(self, size: float) -> None:
+        super().__init__()
+        self.size = size
+
+    def wrap(self, available_width, available_height):
+        return available_width, self.size
+
+    def draw(self) -> None:
+        _draw_logo(self.canv, 0, 0, self.size)
+
+
 def _draw_cover(canvas, doc) -> None:
     canvas.saveState()
     canvas.setFillColor(PRIMARY)
     canvas.rect(0, PAGE_H - _COVER_BAND, PAGE_W, _COVER_BAND, stroke=0, fill=1)
     canvas.setFillColor(ACCENT)
     canvas.rect(0, PAGE_H - _COVER_BAND - 5, PAGE_W, 5, stroke=0, fill=1)
-    # Wordmark.
-    canvas.rect(MARGIN, PAGE_H - 0.62 * inch, 9, 9, stroke=0, fill=1)
-    canvas.setFillColor(WHITE)
-    canvas.setFont("Helvetica-Bold", 11)
-    canvas.drawString(MARGIN + 16, PAGE_H - 0.62 * inch + 0.5, theme.NAME.upper())
+    _draw_cover_art(canvas)
+    _draw_logo(canvas, MARGIN, PAGE_H - 0.5 * inch - 0.5 * inch, 0.5 * inch, dark=True)
     # Disclaimer pinned to the foot of the cover.
     disclaimer = Paragraph(theme.DISCLAIMER, _NOTE)
     _, height = disclaimer.wrap(_CONTENT_WIDTH, 2 * inch)
@@ -133,11 +192,7 @@ def _make_page_chrome(generated_on: str):
     def draw(canvas, doc) -> None:
         canvas.saveState()
         top = PAGE_H - 0.5 * inch
-        canvas.setFillColor(ACCENT)
-        canvas.rect(MARGIN, top, 7, 7, stroke=0, fill=1)
-        canvas.setFillColor(PRIMARY)
-        canvas.setFont("Helvetica-Bold", 8)
-        canvas.drawString(MARGIN + 13, top, theme.NAME.upper())
+        _draw_logo(canvas, MARGIN, top - 3, 15)
         canvas.setFillColor(MUTED)
         canvas.setFont("Helvetica", 8)
         canvas.drawRightString(PAGE_W - MARGIN, top, theme.REPORT_TITLE)
@@ -447,7 +502,7 @@ def _comparison_table(data: ReportData) -> Table:
     for r in bold_rows:
         style.add("FONTNAME", (1, r), (-1, r), "Helvetica-Bold")
         style.add("LINEABOVE", (0, r), (-1, r), 0.6, PRIMARY_MID)
-    style.add("BACKGROUND", (0, ranking_basis_row), (-1, ranking_basis_row), TINT)
+    style.add("BACKGROUND", (0, ranking_basis_row), (-1, ranking_basis_row), HIGHLIGHT)
     style.add("TEXTCOLOR", (1, ranking_basis_row), (-1, ranking_basis_row), PRIMARY)
     style.add("LINEBEFORE", (0, ranking_basis_row), (0, ranking_basis_row), 3, ACCENT)
     # Compact rows: with the extra lines the comparison has to fit on one
@@ -476,7 +531,7 @@ def _ranking_table(data: ReportData) -> Table:
     style.add("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold")
     style.add("FONTNAME", (4, 1), (4, -1), "Helvetica-Bold")
     # The leader gets the accent treatment.
-    style.add("BACKGROUND", (0, 1), (-1, 1), TINT)
+    style.add("BACKGROUND", (0, 1), (-1, 1), HIGHLIGHT)
     style.add("LINEBEFORE", (0, 1), (0, 1), 3, ACCENT)
     table.setStyle(style)
     return table
@@ -667,7 +722,7 @@ def _cover(data: ReportData) -> list:
     title = _style(
         "CoverTitle", fontName="Helvetica-Bold", fontSize=36, leading=42, textColor=WHITE
     )
-    sub = _style("CoverSub", fontSize=11, leading=16, textColor=colors.HexColor("#C9DAD5"))
+    sub = _style("CoverSub", fontSize=11, leading=16, textColor=_c(theme.ON_DARK))
     story: list = [
         Spacer(1, 1.35 * inch),
         Paragraph("INVESTMENT ANALYSIS", white_kicker),
@@ -809,6 +864,11 @@ def _methodology(data: ReportData) -> list:
         Spacer(1, 0.18 * inch),
         Paragraph("Disclaimers", _H2),
         Paragraph(theme.DISCLAIMER, _BODY),
+        Spacer(1, 0.45 * inch),
+        HRFlowable(width="100%", thickness=0.5, color=RULE, spaceAfter=14),
+        _Signoff(0.42 * inch),
+        Spacer(1, 0.08 * inch),
+        Paragraph(f"Prepared with {theme.NAME} on {escape(data.generated_on)}.", _NOTE),
     ]
 
 

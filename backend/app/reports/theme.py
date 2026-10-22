@@ -6,18 +6,22 @@ python-pptx each wrap them in their own colour type.
 NAME = "DealRank"
 REPORT_TITLE = "Deal Comparison & Ranking"
 
-# Deep evergreen + bright accent on warm neutrals: the institutional
-# brokerage look (dark cover, one accent colour, hairline rules).
-INK = "0B1F1B"
-PRIMARY = "003B33"
-PRIMARY_MID = "1C6B5C"
-ACCENT = "2BD48D"
-TINT = "EAF4F0"
-STRIPE = "F5F8F7"
-RULE = "D5DEDB"
-MUTED = "5F6F6B"
+# The web app's brand colours (frontend/src/theme.css): ink navy, teal and
+# brass on cool neutrals, so a report looks like it came from the product.
+INK = "0C1727"
+PRIMARY = "0C1727"
+PRIMARY_MID = "0B6B63"
+ACCENT = "B3812A"
+TINT = "EEF1F5"
+STRIPE = "F6F8FA"
+HIGHLIGHT = "FBF3E2"
+RULE = "DCE2EA"
+MUTED = "5A677A"
 NEGATIVE = "B42318"
 WHITE = "FFFFFF"
+
+# Light text for use on a PRIMARY (dark) background.
+ON_DARK = "C5CFDD"
 
 DISCLAIMER = (
     "This report is a screening analysis prepared from the assumptions entered by the user. "

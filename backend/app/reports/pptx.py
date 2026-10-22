@@ -25,7 +25,7 @@ from pptx.util import Inches, Pt
 
 from app.api.ranking_data import RankedEntry
 from app.engine.types import LayerGroup
-from app.reports import theme
+from app.reports import logo, theme
 from app.reports.assumptions import ASSUMPTION_GROUPS, format_assumption_value, present_rows
 from app.reports.capital_stack import (
     CAPITAL_STACK_HEADERS,
@@ -46,6 +46,7 @@ INK, PRIMARY, PRIMARY_MID, ACCENT = (
     _rgb(theme.PRIMARY_MID),
     _rgb(theme.ACCENT),
 )
+HIGHLIGHT = _rgb(theme.HIGHLIGHT)
 TINT, STRIPE, RULE, MUTED, WHITE = (
     _rgb(theme.TINT),
     _rgb(theme.STRIPE),
@@ -72,8 +73,12 @@ _GROUP_COLORS = {
 # ---------------------------------------------------------------- primitives
 
 
-def _rect(slide, x, y, w, h, fill: RGBColor):
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+def _rect(slide, x, y, w, h, fill: RGBColor, radius: float | None = None):
+    """A filled rectangle; `radius` (a corner radius in inches) rounds it."""
+    kind = MSO_SHAPE.RECTANGLE if radius is None else MSO_SHAPE.ROUNDED_RECTANGLE
+    shape = slide.shapes.add_shape(kind, Inches(x), Inches(y), Inches(w), Inches(h))
+    if radius is not None:
+        shape.adjustments[0] = min(radius / min(w, h), 0.5)
     shape.fill.solid()
     shape.fill.fore_color.rgb = fill
     shape.line.fill.background()
@@ -134,6 +139,52 @@ def _paragraphs(slide, x, y, w, h, lines: list[str], size=11, color=INK, italic=
     return box
 
 
+def _logo(slide, x: float, y: float, size: float, dark: bool = False) -> None:
+    """The DealRank mark and wordmark, drawn from app.reports.logo as native
+    shapes, with the mark's top-left at (x, y)."""
+    palette = logo.DARK if dark else logo.LIGHT
+    _rect(slide, x, y, size, size, _rgb(palette.square), radius=logo.MARK_RADIUS * size)
+    bottom = y + size * (1 - logo.BASELINE)
+    for (left, height), color in zip(logo.BARS, palette.bars, strict=True):
+        _rect(
+            slide,
+            x + left * size,
+            bottom - height * size,
+            logo.BAR_WIDTH * size,
+            height * size,
+            _rgb(color),
+            radius=logo.BAR_RADIUS * size,
+        )
+    _text(
+        slide,
+        x + size * (1 + logo.WORD_GAP),
+        y,
+        size * 5,
+        size,
+        logo.WORDMARK,
+        logo.WORD_SIZE * size * 72,
+        True,
+        _rgb(palette.word),
+        anchor=MSO_ANCHOR.MIDDLE,
+    )
+
+
+def _cover_art(slide, x: float, base: float, size: float) -> None:
+    """The mark's bars, oversized and a shade off the cover colour. `x` is
+    the group's left edge and `base` the line the bars stand on."""
+    first = logo.BARS[0][0]
+    for (left, height), color in zip(logo.BARS, logo.ART_COLORS, strict=True):
+        _rect(
+            slide,
+            x + (left - first) * size,
+            base - height * size,
+            logo.BAR_WIDTH * size,
+            height * size,
+            _rgb(color),
+            radius=logo.BAR_RADIUS * size,
+        )
+
+
 class _Deck:
     """The presentation plus the page counter shown in each footer."""
 
@@ -155,10 +206,10 @@ class _Deck:
         _text(slide, MARGIN, 0.7, CONTENT_W, 0.85, title, 24, True, PRIMARY)
         line = _rect(slide, MARGIN, 7.0, CONTENT_W, 0.01, RULE)
         line.name = "footer rule"
-        _text(slide, MARGIN, 7.08, 1.5, 0.25, theme.NAME.upper(), 9, True, PRIMARY)
+        _logo(slide, SLIDE_W - MARGIN - 1.45, 0.3, 0.3)
         _text(
             slide,
-            MARGIN + 1.5,
+            MARGIN,
             7.08,
             8,
             0.25,
@@ -296,7 +347,7 @@ def _table(
                     size,
                     emphasised or highlighted or c in bold_cols,
                     PRIMARY if highlighted else INK,
-                    TINT if highlighted else (STRIPE if emphasised else None),
+                    HIGHLIGHT if highlighted else (STRIPE if emphasised else None),
                     aligns[c],
                     border=theme.PRIMARY_MID if emphasised else theme.RULE,
                 )
@@ -425,12 +476,12 @@ def _add_cover(deck: _Deck) -> None:
     slide = deck.blank()
     _rect(slide, 0, 0, SLIDE_W, SLIDE_H, PRIMARY)
     _rect(slide, 0, 0, 0.18, SLIDE_H, ACCENT)
-    _rect(slide, 0.9, 0.78, 0.14, 0.14, ACCENT)
-    _text(slide, 1.15, 0.72, 4, 0.3, theme.NAME.upper(), 13, True, WHITE)
+    _cover_art(slide, 8.3, 5.1, 8.6)
+    _logo(slide, 0.9, 0.62, 0.6, dark=True)
     _text(slide, 0.9, 2.0, 9, 0.35, "INVESTMENT ANALYSIS", 13, True, ACCENT)
     _text(slide, 0.9, 2.4, 11, 1.7, "Deal Comparison\n& Ranking", 48, True, WHITE)
-    _text(slide, 0.9, 4.25, 11, 0.4, data.subtitle, 15, False, _rgb("C9DAD5"))
-    _text(slide, 0.9, 4.7, 11, 0.35, data.generated_on, 13, False, _rgb("C9DAD5"))
+    _text(slide, 0.9, 4.25, 11, 0.4, data.subtitle, 15, False, _rgb(theme.ON_DARK))
+    _text(slide, 0.9, 4.7, 11, 0.35, data.generated_on, 13, False, _rgb(theme.ON_DARK))
 
     # Properties analysed, as a light-on-dark table.
     rows = [["", "Property", "Class", "Standing"]]
@@ -469,7 +520,7 @@ def _add_cover(deck: _Deck) -> None:
                 bold=(r == 0 or c in (0, 3)),
                 color=ACCENT if (r == 0 or c == 0) else WHITE,
                 align=PP_ALIGN.RIGHT if c == 3 else PP_ALIGN.LEFT,
-                border="2F6B60",
+                border="2A3B55",
             )
 
 
