@@ -133,10 +133,13 @@ def test_pdf_keeps_headings_with_tables_and_never_splits_a_table(client):
     assert page_of("Comparison") == page_of("Hold period") == page_of("Net sale proceeds")
     # Ranking: heading, header row and every ranked row on one page.
     assert page_of("Ranking") == page_of("Rank") == page_of("#1") == page_of("#5")
-    # Assumptions heading sits with the first deal's table.
-    assumptions_page = page_of("Assumptions")
-    assert "(Sub-asset class)" in pages[assumptions_page]
-    # Each assumptions table starts and ends on the same page.
+    # Every deal profile page carries its own assumptions, capital stack and
+    # pro forma, and each deal's assumptions table starts and ends on one page.
+    profile_pages = [i for i, page in enumerate(pages) if "(Underwriting assumptions)" in page]
+    assert len(profile_pages) == 5
+    for i in profile_pages:
+        assert "(Sub-asset class)" in pages[i] and "(Selling costs rate)" in pages[i]
+        assert "(Capital stack)" in pages[i] and "(Pro forma cash flow)" in pages[i]
     for page in pages:
         assert page.count("(Sub-asset class)") == page.count("(Selling costs rate)")
 
@@ -266,3 +269,33 @@ def test_pptx_tables_fit_in_risk_mode_at_five_deals(client, spreads):
                 table = shape.table
                 assert shape.top + sum(r.height for r in table.rows) <= prs.slide_height
                 assert shape.left + sum(c.width for c in table.columns) <= prs.slide_width
+
+
+def test_pdf_has_cover_executive_summary_and_disclaimer(client, spreads):
+    ids = _seed_two_deals(client)
+    pages = _pdf_page_texts(client.get("/reports/pdf", params=_risk_params(ids)).content)
+    assert "(INVESTMENT ANALYSIS)" in pages[0]
+    assert any("(Executive summary)" in page and "(Ranking)" in page for page in pages)
+    assert any("(Methodology & sources)" in page for page in pages)
+
+
+def test_pptx_has_chart_and_action_titles(client, spreads):
+    import io
+
+    from pptx import Presentation
+
+    ids = _seed_two_deals(client)
+    prs = Presentation(io.BytesIO(client.get("/reports/pptx", params=_risk_params(ids)).content))
+    assert prs.slide_width / prs.slide_height > 1.7  # 16:9
+    assert any(shape.has_chart for slide in prs.slides for shape in slide.shapes)
+    text = _pptx_text(client.get("/reports/pptx", params=_risk_params(ids)).content)
+    assert "unlevered IRR" in text and "Methodology and disclaimers" in text
+
+
+def test_negative_money_puts_the_sign_before_the_symbol():
+    from decimal import Decimal
+
+    from app.reports.formatting import money
+
+    assert money(Decimal("-1234.5")) == "-$1,234"
+    assert money(Decimal("1234")) == "$1,234"
