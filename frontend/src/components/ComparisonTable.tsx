@@ -136,6 +136,11 @@ const EXIT_ROWS: Row[] = [
     kind: "deduction",
   },
   {
+    label: "Prepayment penalties",
+    value: (_, m) => formatMoney(m.prepayment_penalties),
+    kind: "deduction",
+  },
+  {
     label: "Preferred equity repaid",
     value: (_, m) => formatMoney(m.preferred_equity_repayment),
     kind: "deduction",
@@ -162,7 +167,7 @@ const FORMULAS: [string, string][] = [
   ["Going-in cap rate", "Year 1 NOI ÷ purchase price"],
   [
     "Annual debt service",
-    "Each debt layer month by month: interest-only for its I/O period, then a level payment over the remaining amortization; floating rate = index + spread",
+    "Each debt layer month by month: interest-only for its I/O period, then a level payment over the remaining amortization; floating rate = index + spread; HUD loans add the FHA mortgage insurance premium on the outstanding balance",
   ],
   ["Senior DSCR", "NOI ÷ senior loan debt service"],
   ["Combined DSCR", "NOI ÷ debt service on every debt layer (preferred equity excluded)"],
@@ -174,7 +179,11 @@ const FORMULAS: [string, string][] = [
   ["Exit value", "NOI (year N+1) ÷ exit cap rate"],
   [
     "Net sale proceeds",
-    "Exit value − selling costs − remaining debt balances − preferred equity repaid",
+    "Exit value − selling costs − remaining debt balances − prepayment penalties − preferred equity repaid",
+  ],
+  [
+    "Prepayment penalty",
+    "Charged on a loan repaid at the sale before maturity. Step-down: the loan-year % × balance. Yield maintenance: PV at Treasury of (note rate − Treasury) on the balance to maturity, at least 1%. Defeasance: PV at Treasury of every remaining payment, less the balance",
   ],
   ["Levered IRR", "IRR of −equity, levered cash flow years 1…N, plus net sale proceeds in year N"],
   [

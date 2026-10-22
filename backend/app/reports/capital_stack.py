@@ -6,7 +6,14 @@ under the name the user typed for them.
 from decimal import Decimal
 
 from app.api.converters import engine_layer
-from app.engine.types import DealMetrics, FinancingLayer, LayerGroup, LayerType, RateType
+from app.engine.types import (
+    DealMetrics,
+    FinancingLayer,
+    LayerGroup,
+    LayerType,
+    PrepaymentType,
+    RateType,
+)
 from app.models.deal import Deal
 from app.reports.formatting import money, percent
 
@@ -81,9 +88,26 @@ def _terms(layer: FinancingLayer) -> str:
             parts.append("recourse" if layer.recourse else "non-recourse")
         if layer.rate_cap_cost:
             parts.append(f"rate cap {money(layer.rate_cap_cost)}")
+        if layer.mip_annual_rate or layer.mip_upfront_rate:
+            annual, upfront = percent(layer.mip_annual_rate), percent(layer.mip_upfront_rate)
+            parts.append(f"MIP {annual}/yr + {upfront} upfront")
+        prepayment = _prepayment(layer)
+        if prepayment:
+            parts.append(prepayment)
     if layer.origination_fee_rate:
         parts.append(f"{percent(layer.origination_fee_rate)} fee")
     return ", ".join(parts) if parts else "—"
+
+
+def _prepayment(layer: FinancingLayer) -> str | None:
+    if layer.prepayment_type is PrepaymentType.STEP_DOWN:
+        steps = "-".join(f"{rate * 100:g}" for rate in layer.prepayment_schedule)
+        return f"prepay step-down {steps}%"
+    if layer.prepayment_type is PrepaymentType.YIELD_MAINTENANCE:
+        return f"yield maintenance (UST {percent(layer.prepayment_treasury_rate)})"
+    if layer.prepayment_type is PrepaymentType.DEFEASANCE:
+        return f"defeasance (UST {percent(layer.prepayment_treasury_rate)})"
+    return None
 
 
 def capital_stack_rows(deal: Deal, metrics: DealMetrics) -> list[list[str]]:

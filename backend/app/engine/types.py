@@ -135,6 +135,31 @@ class RateType(str, enum.Enum):
     FLOATING = "floating"
 
 
+class PrepaymentType(str, enum.Enum):
+    """What it costs to repay a loan before it matures (at the sale).
+
+    - STEP_DOWN: a share of the balance by loan year, e.g. 5-4-3-2-1 (bank
+      loans) or 10% declining 1% a year (HUD).
+    - YIELD_MAINTENANCE: the present value of the lender's lost interest
+      (note rate - Treasury) over the remaining term, at least 1% of the
+      balance (Agency, life company).
+    - DEFEASANCE: the cost of a Treasury portfolio that replaces every
+      remaining payment, less the balance it retires (CMBS).
+    """
+
+    NONE = "none"
+    STEP_DOWN = "step_down"
+    YIELD_MAINTENANCE = "yield_maintenance"
+    DEFEASANCE = "defeasance"
+
+
+# Loan types that can carry FHA mortgage insurance: HUD loans, and an
+# assumed loan (which may be an existing HUD loan).
+MORTGAGE_INSURANCE_TYPES = frozenset(
+    {LayerType.HUD_223F, LayerType.HUD_221D4, LayerType.LOAN_ASSUMPTION}
+)
+
+
 @dataclass(frozen=True)
 class FinancingLayer:
     """One layer of a deal's capital stack. Debt and preferred equity
@@ -170,6 +195,20 @@ class FinancingLayer:
     # --- Preferred equity only ---
     preferred_return: Decimal | None = None
 
+    # --- Prepayment (debt only; charged at the sale if before maturity) ---
+    prepayment_type: PrepaymentType = PrepaymentType.NONE
+    # STEP_DOWN: share of the balance by loan year (year 1 first); 0 after.
+    prepayment_schedule: tuple[Decimal, ...] = ()
+    # YIELD_MAINTENANCE / DEFEASANCE: the Treasury yield the remaining
+    # payments are discounted (and reinvested) at.
+    prepayment_treasury_rate: Decimal | None = None
+
+    # --- FHA mortgage insurance (HUD loans) ---
+    # Annual premium on the outstanding balance, paid monthly with debt
+    # service; upfront premium on the loan amount, paid at closing.
+    mip_annual_rate: Decimal = Decimal("0")
+    mip_upfront_rate: Decimal = Decimal("0")
+
     @property
     def group(self) -> LayerGroup:
         return self.layer_type.group
@@ -191,11 +230,15 @@ class FinancingLayer:
 
     @property
     def upfront_cost(self) -> Decimal:
-        """Origination fee plus rate cap — paid at closing, so it adds to
-        the equity check (levered returns only; unlevered ignores
-        financing entirely).
+        """Origination fee, rate cap and upfront mortgage insurance — paid at
+        closing, so they add to the equity check (levered returns only;
+        unlevered ignores financing entirely).
         """
-        return self.amount * self.origination_fee_rate + self.rate_cap_cost
+        return (
+            self.amount * self.origination_fee_rate
+            + self.rate_cap_cost
+            + self.amount * self.mip_upfront_rate
+        )
 
 
 @dataclass(frozen=True)
@@ -368,6 +411,9 @@ class AnnualCashFlow:
     senior_debt_service: Decimal = Decimal("0")
     balloon_payment: Decimal = Decimal("0")
     preferred_distribution: Decimal = Decimal("0")
+    # FHA mortgage insurance premium paid this year; already inside
+    # debt_service (and so inside DSCR, as HUD underwrites it).
+    mortgage_insurance: Decimal = Decimal("0")
     # Preferred return that couldn't be paid from cash flow this year, and
     # the running unpaid total (settled at exit).
     preferred_shortfall: Decimal = Decimal("0")
@@ -410,6 +456,8 @@ class DealMetrics:
     preferred_equity: Decimal = Decimal("0")
     upfront_financing_costs: Decimal = Decimal("0")
     preferred_equity_repayment: Decimal = Decimal("0")
+    # Prepayment penalties on loans repaid at the sale before maturity.
+    prepayment_penalties: Decimal = Decimal("0")
     # Ranking inputs. Gross IRR is before closing and selling costs (the
     # basis the risk-adjusted hurdle is quoted on); min DSCR is the lowest
     # combined DSCR over the hold; debt yield is year-one NOI over all debt;

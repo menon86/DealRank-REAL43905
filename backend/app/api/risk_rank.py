@@ -6,6 +6,7 @@ a DSCR gate removes under-covered deals. Optional preference weights then
 blend return, cash flow and safety. See app/engine/ranking.py.
 """
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,6 +31,7 @@ from app.engine.metrics import compute
 from app.engine.ranking import (
     RETURN_ONLY,
     Candidate,
+    FactorScores,
     RiskAdjustedHurdle,
     Weights,
     passes_debt_yield_gate,
@@ -37,6 +39,7 @@ from app.engine.ranking import (
     questionnaire_to_weights,
     score_candidates,
 )
+from app.engine.types import DealMetrics
 from app.models.cap_rate_spread import CapRateSpread
 from app.models.deal import Deal
 from app.services.treasury import TreasuryQuote, get_treasury_10y, override_quote
@@ -132,8 +135,43 @@ def _warnings(deal: Deal, metrics, hurdle: HurdleOut) -> list[str]:
     return warnings
 
 
-@router.post("/rank/risk-adjusted", response_model=RiskRankResponse, response_model_by_alias=True)
-def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) -> RiskRankResponse:
+@dataclass(frozen=True)
+class RankedRow:
+    rank: int
+    deal: Deal
+    metrics: DealMetrics
+    hurdle: HurdleOut
+    spread: Decimal
+    ltv: Decimal
+    warnings: list[str]
+    factors: FactorScores
+    score: Decimal
+
+
+@dataclass(frozen=True)
+class ExcludedRow:
+    deal: Deal
+    metrics: DealMetrics
+    hurdle: HurdleOut
+    reason: str
+
+
+@dataclass(frozen=True)
+class RiskRanking:
+    """The risk-adjusted ranking with the ORM deals and engine metrics
+    still attached, so the API response and the PDF/PPTX reports are built
+    from one computation and cannot disagree.
+    """
+
+    treasury: TreasuryQuote
+    dscr_minimum: Decimal
+    debt_yield_minimum: Decimal | None
+    weights: Weights
+    ranked: list[RankedRow]
+    excluded: list[ExcludedRow]
+
+
+def compute_risk_ranking(db: Session, payload: RiskRankRequest) -> RiskRanking:
     treasury = (
         override_quote(payload.treasury_yield)
         if payload.treasury_yield is not None
@@ -150,7 +188,7 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
         hurdle = build_hurdle(latest_spread(db, deal.sub_asset_class.value), treasury)
         evaluated.append((deal, metrics, hurdle))
 
-    excluded: list[ExcludedDealOut] = []
+    excluded: list[ExcludedRow] = []
     candidates: list[Candidate] = []
     kept = {}
     for deal, metrics, hurdle in evaluated:
@@ -168,14 +206,7 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
         elif metrics.unlevered_irr_before_costs is None:
             reason = "Unlevered IRR did not converge."
         if reason:
-            excluded.append(
-                ExcludedDealOut(
-                    deal=deal,
-                    metrics=MetricsOut.model_validate(metrics),
-                    hurdle=hurdle,
-                    reason=reason,
-                )
-            )
+            excluded.append(ExcludedRow(deal=deal, metrics=metrics, hurdle=hurdle, reason=reason))
             continue
         spread = metrics.unlevered_irr_before_costs - hurdle.total
         key = str(deal.id)
@@ -198,26 +229,62 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
     for index, s in enumerate(scored):
         deal, metrics, hurdle, spread = kept[s.key]
         ranked.append(
-            RiskRankedDealOut(
+            RankedRow(
                 rank=index + 1,
                 deal=deal,
-                metrics=MetricsOut.model_validate(metrics),
+                metrics=metrics,
                 hurdle=hurdle,
                 spread=spread,
                 ltv=metrics.total_debt / deal.purchase_price,
                 warnings=_warnings(deal, metrics, hurdle),
-                factors=FactorScoresOut(
-                    irr=s.factors.irr, cash_flow=s.factors.cash_flow, risk=s.factors.risk
-                ),
+                factors=s.factors,
                 score=s.score,
             )
         )
 
-    return RiskRankResponse(
-        treasury=treasury_out(treasury),
+    return RiskRanking(
+        treasury=treasury,
         dscr_minimum=payload.dscr_minimum,
-        weights=WeightsOut(irr=weights.irr, cash_flow=weights.cash_flow, risk=weights.risk),
+        debt_yield_minimum=payload.debt_yield_minimum,
+        weights=weights,
         ranked=ranked,
         excluded=excluded,
+    )
+
+
+@router.post("/rank/risk-adjusted", response_model=RiskRankResponse, response_model_by_alias=True)
+def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) -> RiskRankResponse:
+    result = compute_risk_ranking(db, payload)
+    return RiskRankResponse(
+        treasury=treasury_out(result.treasury),
+        dscr_minimum=result.dscr_minimum,
+        weights=WeightsOut(
+            irr=result.weights.irr, cash_flow=result.weights.cash_flow, risk=result.weights.risk
+        ),
+        ranked=[
+            RiskRankedDealOut(
+                rank=r.rank,
+                deal=r.deal,
+                metrics=MetricsOut.model_validate(r.metrics),
+                hurdle=r.hurdle,
+                spread=r.spread,
+                ltv=r.ltv,
+                warnings=r.warnings,
+                factors=FactorScoresOut(
+                    irr=r.factors.irr, cash_flow=r.factors.cash_flow, risk=r.factors.risk
+                ),
+                score=r.score,
+            )
+            for r in result.ranked
+        ],
+        excluded=[
+            ExcludedDealOut(
+                deal=e.deal,
+                metrics=MetricsOut.model_validate(e.metrics),
+                hurdle=e.hurdle,
+                reason=e.reason,
+            )
+            for e in result.excluded
+        ],
         basis_note=BASIS_NOTE,
     )

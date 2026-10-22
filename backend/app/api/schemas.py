@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from app.api.converters import engine_layer
 from app.api.ranking_data import RANKING_BASIS_NOTE
 from app.engine.financing import common_equity_errors, validate_capital_stack
-from app.engine.types import FinancingLayer, LayerGroup, LayerType, RateType
+from app.engine.types import FinancingLayer, LayerGroup, LayerType, PrepaymentType, RateType
 from app.models.deal import LeasingMode, SubAssetClass
 
 DealName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
@@ -49,6 +49,17 @@ class CapitalStackLayer(BaseModel):
     origination_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
 
     preferred_return: Decimal | None = Field(default=None, ge=0, le=1)
+
+    prepayment_type: PrepaymentType = PrepaymentType.NONE
+    # Step-down: share of the balance by loan year, year 1 first.
+    prepayment_schedule: list[Annotated[Decimal, Field(ge=0, le=1)]] = Field(
+        default_factory=list, max_length=50
+    )
+    prepayment_treasury_rate: Decimal | None = Field(default=None, ge=0, le=1)
+
+    # FHA mortgage insurance (HUD loans).
+    mip_annual_rate: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("0.05"))
+    mip_upfront_rate: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("0.05"))
 
 
 class UnitMixTier(BaseModel):
@@ -267,6 +278,7 @@ class AnnualCashFlowOut(BaseModel):
     credit_loss: Decimal
     management_fee: Decimal
     replacement_reserves: Decimal
+    mortgage_insurance: Decimal
 
 
 class MetricsOut(BaseModel):
@@ -293,6 +305,7 @@ class MetricsOut(BaseModel):
     preferred_equity: Decimal
     upfront_financing_costs: Decimal
     preferred_equity_repayment: Decimal
+    prepayment_penalties: Decimal
     unlevered_irr_before_costs: Decimal | None
     min_dscr: Decimal | None
     debt_yield: Decimal | None

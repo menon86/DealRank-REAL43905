@@ -5,7 +5,14 @@
  * validate_capital_stack), so the form can flag a bad stack before saving.
  */
 
-import type { CapitalStackLayer, DealOut, LayerGroup, LayerType, RateType } from "./types";
+import type {
+  CapitalStackLayer,
+  DealOut,
+  LayerGroup,
+  LayerType,
+  PrepaymentType,
+  RateType,
+} from "./types";
 
 export interface LayerOption {
   type: LayerType;
@@ -182,6 +189,99 @@ export function layerDisplayName(type: LayerType, label: string | null): string 
 }
 
 // ---------------------------------------------------------------------------
+// Prepayment and FHA mortgage insurance: typical terms by loan type. These
+// are starting values the user can change, not rules.
+// ---------------------------------------------------------------------------
+
+export const PREPAYMENT_LABELS: Record<PrepaymentType, string> = {
+  none: "None / open",
+  step_down: "Step-down (% of balance by year)",
+  yield_maintenance: "Yield maintenance",
+  defeasance: "Defeasance",
+};
+
+/** HUD loans, and an assumed loan (which may be an existing HUD loan). */
+export function allowsMortgageInsurance(type: LayerType): boolean {
+  return type === "hud_223f" || type === "hud_221d4" || type === "loan_assumption";
+}
+
+interface TypeDefaults {
+  prepayment_type: PrepaymentType;
+  prepayment_schedule: string;
+  mip_annual_pct: string;
+  mip_upfront_pct: string;
+  amortization_years?: string;
+  term_years?: string;
+}
+
+const HUD_STEP_DOWN = "10, 9, 8, 7, 6, 5, 4, 3, 2, 1";
+// FHA multifamily MIP: 0.25% annual and upfront for 223(f) and 221(d)(4)
+// applications from Oct 1, 2025 (HUD final notice, Federal Register,
+// Sept 23, 2025). Older loans carry higher rates; the field is editable.
+const HUD_MIP = "0.25";
+
+export function typeDefaults(type: LayerType): TypeDefaults {
+  const none = { prepayment_schedule: "", mip_annual_pct: "0", mip_upfront_pct: "0" };
+  switch (type) {
+    case "agency_fannie_mae":
+    case "agency_freddie_mac":
+    case "life_company":
+    case "supplemental_loan":
+      return { ...none, prepayment_type: "yield_maintenance", term_years: "10" };
+    case "cmbs":
+      return { ...none, prepayment_type: "defeasance", term_years: "10" };
+    case "bank_credit_union":
+      return { ...none, prepayment_type: "step_down", prepayment_schedule: "5, 4, 3, 2, 1" };
+    case "hud_223f":
+      return {
+        prepayment_type: "step_down",
+        prepayment_schedule: HUD_STEP_DOWN,
+        mip_annual_pct: HUD_MIP,
+        mip_upfront_pct: HUD_MIP,
+        amortization_years: "35",
+        term_years: "35",
+      };
+    case "hud_221d4":
+      return {
+        prepayment_type: "step_down",
+        prepayment_schedule: HUD_STEP_DOWN,
+        mip_annual_pct: HUD_MIP,
+        mip_upfront_pct: HUD_MIP,
+        amortization_years: "40",
+        term_years: "40",
+      };
+    default:
+      return { ...none, prepayment_type: "none" };
+  }
+}
+
+function needsTreasury(prepayment: PrepaymentType): boolean {
+  return prepayment === "yield_maintenance" || prepayment === "defeasance";
+}
+
+/**
+ * Fills a blank Treasury rate with the market rate (percent string) on every
+ * layer whose prepayment needs one; layers the user already filled are kept.
+ */
+export function withDefaultTreasury(layers: LayerForm[], treasuryPct: string): LayerForm[] {
+  if (treasuryPct === "") return layers;
+  return layers.map((layer) =>
+    isDebtType(layer.type) &&
+    needsTreasury(layer.prepayment_type) &&
+    layer.prepayment_treasury_pct.trim() === ""
+      ? { ...layer, prepayment_treasury_pct: treasuryPct }
+      : layer,
+  );
+}
+
+/** "5, 4, 3-2 1" -> [0.05, 0.04, 0.03, 0.02, 0.01]; null if any entry isn't a number. */
+export function parseStepDown(value: string): number[] | null {
+  const parts = value.split(/[\s,;/-]+/).filter((p) => p !== "");
+  const rates = parts.map((p) => Number(p) / 100);
+  return rates.every((r) => Number.isFinite(r)) ? rates : null;
+}
+
+// ---------------------------------------------------------------------------
 // Form shape: every number is the raw input string, rates in percent.
 // ---------------------------------------------------------------------------
 
@@ -209,6 +309,12 @@ export interface LayerForm {
   rate_cap_cost: string;
   origination_fee_pct: string;
   preferred_return_pct: string;
+  prepayment_type: PrepaymentType;
+  /** Step-down percentages by loan year, e.g. "5, 4, 3, 2, 1". */
+  prepayment_schedule: string;
+  prepayment_treasury_pct: string;
+  mip_annual_pct: string;
+  mip_upfront_pct: string;
   expanded: boolean;
 }
 
@@ -220,6 +326,7 @@ function nextKey(): string {
 
 export function blankLayer(type: LayerType): LayerForm {
   const debt = isDebtType(type);
+  const defaults = typeDefaults(type);
   return {
     key: nextKey(),
     type,
@@ -233,12 +340,17 @@ export function blankLayer(type: LayerType): LayerForm {
     index_rate_pct: "",
     spread_bps: "",
     io_months: "0",
-    amortization_years: debt && type !== "mezzanine" ? "30" : "",
-    term_years: "",
+    amortization_years: defaults.amortization_years ?? (debt && type !== "mezzanine" ? "30" : ""),
+    term_years: defaults.term_years ?? "",
     recourse: "",
     rate_cap_cost: "0",
     origination_fee_pct: "0",
     preferred_return_pct: "",
+    prepayment_type: debt ? defaults.prepayment_type : "none",
+    prepayment_schedule: defaults.prepayment_schedule,
+    prepayment_treasury_pct: "",
+    mip_annual_pct: defaults.mip_annual_pct,
+    mip_upfront_pct: defaults.mip_upfront_pct,
     expanded: debt || type === "preferred_equity",
   };
 }
@@ -268,6 +380,13 @@ export function layerToForm(layer: CapitalStackLayer): LayerForm {
     rate_cap_cost: String(layer.rate_cap_cost),
     origination_fee_pct: pct(layer.origination_fee_rate),
     preferred_return_pct: pct(layer.preferred_return),
+    prepayment_type: layer.prepayment_type ?? "none",
+    prepayment_schedule: (layer.prepayment_schedule ?? [])
+      .map((r) => String(Number((r * 100).toFixed(4))))
+      .join(", "),
+    prepayment_treasury_pct: pct(layer.prepayment_treasury_rate ?? null),
+    mip_annual_pct: pct(layer.mip_annual_rate ?? 0),
+    mip_upfront_pct: pct(layer.mip_upfront_rate ?? 0),
     expanded: false,
   };
 }
@@ -342,6 +461,22 @@ export function formToLayer(layer: LayerForm, totalCost: number): CapitalStackLa
       layerGroup(layer.type) !== "equity" ? (pctToFraction(layer.origination_fee_pct) ?? 0) : 0,
     preferred_return:
       layer.type === "preferred_equity" ? pctToFraction(layer.preferred_return_pct) : null,
+    prepayment_type: debt ? layer.prepayment_type : "none",
+    prepayment_schedule:
+      debt && layer.prepayment_type === "step_down"
+        ? (parseStepDown(layer.prepayment_schedule) ?? [])
+        : [],
+    prepayment_treasury_rate:
+      debt &&
+      (layer.prepayment_type === "yield_maintenance" || layer.prepayment_type === "defeasance")
+        ? pctToFraction(layer.prepayment_treasury_pct)
+        : null,
+    mip_annual_rate: allowsMortgageInsurance(layer.type)
+      ? (pctToFraction(layer.mip_annual_pct) ?? 0)
+      : 0,
+    mip_upfront_rate: allowsMortgageInsurance(layer.type)
+      ? (pctToFraction(layer.mip_upfront_pct) ?? 0)
+      : 0,
   };
 }
 
@@ -409,6 +544,37 @@ export function validateLayers(layers: LayerForm[], totalCost: number): string[]
     if (amort !== null && io >= amort * 12) {
       errors.push(`${name}: the amortization period must be longer than the interest-only period.`);
     }
+
+    if (layer.prepayment_type === "step_down") {
+      const steps = parseStepDown(layer.prepayment_schedule);
+      if (steps === null || steps.length === 0) {
+        errors.push(`${name}: enter the step-down percentages by year, e.g. 5, 4, 3, 2, 1.`);
+      } else if (steps.some((r) => r < 0 || r > 1)) {
+        errors.push(`${name}: step-down percentages must be between 0 and 100.`);
+      }
+    } else if (
+      layer.prepayment_type === "yield_maintenance" ||
+      layer.prepayment_type === "defeasance"
+    ) {
+      if (term === null) {
+        errors.push(`${name}: yield maintenance and defeasance need a term / maturity.`);
+      }
+      const treasury = num(layer.prepayment_treasury_pct);
+      if (treasury === null || treasury < 0 || treasury > 100) {
+        errors.push(`${name}: enter the Treasury rate for the prepayment calculation.`);
+      }
+    }
+    if (allowsMortgageInsurance(layer.type)) {
+      for (const [label, value] of [
+        ["annual", layer.mip_annual_pct],
+        ["upfront", layer.mip_upfront_pct],
+      ]) {
+        const mip = num(value);
+        if (value.trim() !== "" && (mip === null || mip < 0 || mip > 5)) {
+          errors.push(`${name}: ${label} mortgage insurance must be between 0 and 5%.`);
+        }
+      }
+    }
   });
 
   // Debt and preferred equity can't cover (nearly) the whole cost: the
@@ -418,7 +584,9 @@ export function validateLayers(layers: LayerForm[], totalCost: number): string[]
       .filter((l) => isDebtType(l.type) || l.type === "preferred_equity")
       .reduce((sum, l) => sum + Math.max(0, layerAmount(l, totalCost)), 0);
     if (financed > totalCost * 0.95) {
-      errors.push("Debt and preferred equity must leave at least 5% of total cost as common equity.");
+      errors.push(
+        "Debt and preferred equity must leave at least 5% of total cost as common equity.",
+      );
     }
   }
   return errors;
@@ -436,6 +604,19 @@ function levelPayment(principal: number, annualRate: number, months: number): nu
   return (principal * r * f) / (f - 1);
 }
 
+/** Origination fee, rate cap and upfront mortgage insurance, paid at closing. */
+export function upfrontCost(layer: LayerForm, totalCost: number): number {
+  if (layerGroup(layer.type) === "equity") return 0;
+  const amount = layerAmount(layer, totalCost);
+  const fee = ((num(layer.origination_fee_pct) ?? 0) / 100) * amount;
+  const cap =
+    isDebtType(layer.type) && layer.rate_type === "floating" ? (num(layer.rate_cap_cost) ?? 0) : 0;
+  const mip = allowsMortgageInsurance(layer.type)
+    ? ((num(layer.mip_upfront_pct) ?? 0) / 100) * amount
+    : 0;
+  return fee + cap + mip;
+}
+
 /** Year 1 debt service for one debt layer, month by month (I/O then amortizing). */
 export function yearOneDebtService(layer: LayerForm, totalCost: number): number {
   if (!isDebtType(layer.type)) return 0;
@@ -444,12 +625,15 @@ export function yearOneDebtService(layer: LayerForm, totalCost: number): number 
   const io = num(layer.io_months) ?? 0;
   const amort = num(layer.amortization_years);
   const term = num(layer.term_years);
+  const mipRate = allowsMortgageInsurance(layer.type) ? (num(layer.mip_annual_pct) ?? 0) / 100 : 0;
   let balance = amount;
   let payment: number | null = null;
   let total = 0;
   for (let month = 1; month <= 12; month += 1) {
     if (balance <= 0) break;
     const interest = (balance * rate) / 12;
+    // FHA mortgage insurance on the opening balance, paid with debt service.
+    total += (balance * mipRate) / 12;
     let principal = 0;
     if (amort !== null && month > io) {
       payment ??= levelPayment(balance, rate, amort * 12 - io);

@@ -3,8 +3,9 @@
 Exit value uses forward NOI (decision D1, section 2): year N+1 NOI divided
 by the exit cap rate, where N = hold_period_years. Net sale proceeds are
 exit value less selling costs less the outstanding balance of every debt
-layer at exit, less the return of preferred equity's capital — debt and
-preferred equity are paid off ahead of common equity, in that order.
+layer at exit and any prepayment penalties, less the return of preferred
+equity's capital — debt and preferred equity are paid off ahead of common
+equity, in that order.
 
 Levered cash flow is NOI less replacement reserves, debt service (every
 debt layer), any balloon repaid inside the hold, and the preferred return
@@ -18,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.engine.debt import stack_schedule
+from app.engine.debt import stack_prepayment_penalties, stack_schedule
 from app.engine.expenses import operating_expenses, turnover_expense
 from app.engine.financing import annual_preferred_distribution, total_preferred_equity
 from app.engine.revenue import effective_gross_income, gross_potential_rent
@@ -36,6 +37,7 @@ class WaterfallResult:
     selling_costs: Decimal
     loan_balance_at_exit: Decimal
     preferred_equity_repayment: Decimal = Decimal("0")
+    prepayment_penalties: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,7 @@ def project(deal: DealInputs) -> WaterfallResult:
                 unlevered_cash_flow=unlevered_cf,
                 senior_debt_service=stack_year.senior_debt_service,
                 balloon_payment=debt_year.balloon_payment,
+                mortgage_insurance=debt_year.mortgage_insurance,
                 preferred_distribution=paid,
                 preferred_shortfall=shortfall,
                 preferred_accrued=accrued,
@@ -150,7 +153,12 @@ def project(deal: DealInputs) -> WaterfallResult:
     ending_balance = debt_schedule[-1].combined.ending_balance if debt_schedule else Decimal("0")
     preferred_repayment = total_preferred_equity(deal) + accrued
     selling_costs = exit_value * deal.selling_costs_rate
-    net_sale_proceeds = exit_value - selling_costs - ending_balance - preferred_repayment
+    # Loans repaid at the sale before maturity pay their prepayment penalty
+    # (step-down, yield maintenance or defeasance) out of the proceeds.
+    prepayment_penalties = stack_prepayment_penalties(deal)
+    net_sale_proceeds = (
+        exit_value - selling_costs - ending_balance - prepayment_penalties - preferred_repayment
+    )
 
     return WaterfallResult(
         annual_cash_flows=annual_cash_flows,
@@ -160,4 +168,5 @@ def project(deal: DealInputs) -> WaterfallResult:
         selling_costs=selling_costs,
         loan_balance_at_exit=ending_balance,
         preferred_equity_repayment=preferred_repayment,
+        prepayment_penalties=prepayment_penalties,
     )

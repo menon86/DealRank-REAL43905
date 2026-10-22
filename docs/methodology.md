@@ -272,8 +272,27 @@ Each debt layer is simulated month by month (decision D2) and the layers are sum
 - **Maturity**: a term ending inside the hold is repaid as a **balloon** that month, out of
   that year's levered cash flow (no refinancing is modeled). A term ending at or after the exit
   is repaid from sale proceeds like any other loan balance.
-- **Upfront costs**: origination fee (% of the layer) and rate cap cost are paid at closing out
-  of equity.
+- **Upfront costs**: origination fee (% of the layer), rate cap cost and upfront FHA mortgage
+  insurance are paid at closing out of equity.
+- **FHA mortgage insurance (HUD 223(f), 221(d)(4), or an assumed HUD loan)**: the annual
+  premium is charged monthly on the opening balance ($	ext{balance} 	imes 	ext{MIP}/12$) and
+  is part of debt service, so it is in both DSCRs, as HUD underwrites it. The upfront premium is
+  a share of the loan amount. The form defaults both to 0.25%, HUD's rate for applications from
+  Oct 1, 2025 (Federal Register final notice, Sept 23, 2025); older loans carry higher rates.
+- **Prepayment at the sale**: a debt layer still outstanding at the exit and repaid before its
+  maturity pays a penalty out of net sale proceeds (levered only; unlevered IRR is unaffected).
+  A loan that matures by the exit pays none.
+  - *Step-down* (bank loans 5-4-3-2-1, HUD 10% declining 1% a year): the rate for the loan year
+    the sale falls in (year = hold period) × the balance; 0% once the schedule runs out.
+  - *Yield maintenance* (Agency, life company): with $t$ = Treasury/12 and $B_k$ the scheduled
+    opening balance in month $k$ after the exit,
+    $\maxig(\sum_k B_k \cdot (	ext{note rate} - 	ext{Treasury})/12 \,/\, (1+t)^k,\;
+    1\% 	imes 	ext{balance}ig)$.
+  - *Defeasance* (CMBS): the cost of Treasuries that replace every remaining scheduled payment
+    and the balloon at maturity, $\sum_k 	ext{payment}_k/(1+t)^k$, less the balance retired;
+    never below zero. Defeasance transaction fees aren't modeled.
+  - The Treasury rate is an input (the form pre-fills the 10-Year Treasury the app already
+    looks up for the hurdle). Open windows before maturity and lockouts aren't modeled.
 - **Recourse** is recorded and reported but has no effect on the math.
 
 #### B. Preferred equity
@@ -285,11 +304,13 @@ neither DSCR.
 #### C. Waterfall and metrics with a stack
 ```
 Debt service (year n)   = sum of every debt layer's interest + principal
+                          + FHA mortgage insurance
 Levered CF (year n)     = NOI - debt service - preferred return - any balloon that year
-Common equity invested  = price + closing costs + fees and rate caps - all debt - preferred equity
+Common equity invested  = price + closing costs + fees, rate caps and upfront MIP
+                          - all debt - preferred equity
                           (must be >= 5% of that total cost)
 Net sale proceeds       = exit value - selling costs - every debt balance at exit
-                          - preferred equity repaid
+                          - prepayment penalties - preferred equity repaid
 Senior DSCR             = NOI / senior loan debt service
 Combined DSCR           = NOI / debt service on every debt layer   (year_one_dscr)
 ```
@@ -332,7 +353,10 @@ before closing and selling costs, the basis the hurdle is quoted on.
   reported as undefined if the cash flows change sign more than once.
 - The static cap-rate spread assumes cap rates move one-for-one with the Treasury; historically the
   beta is lower, so the absolute hurdle (not the rank order) is sensitive to the Treasury input.
-- The two ranking endpoints differ: `/rank` uses one flat user hurdle (and the PDF/PPTX exports use
-  it too); `/rank/risk-adjusted` uses sub-class hurdles, gates and preferences.
+- The two ranking endpoints differ: `/rank` uses one flat user hurdle; `/rank/risk-adjusted` uses
+  sub-class hurdles, gates and preferences. The PDF/PPTX exports default to the risk-adjusted
+  ranking (same computation as the endpoint) and show how each hurdle was built; passing
+  `hurdle_rate` still produces the flat-hurdle report, which the Comparison and Ranking tabs use.
+  See `docs/source-memo.md` for every data input and its date.
 - `lease_expiration_month` is stored and shown but not used by the annual model.
 - There is no authentication.

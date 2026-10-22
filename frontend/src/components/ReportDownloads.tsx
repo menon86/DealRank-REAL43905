@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { describeError, downloadReport } from "../lib/client";
+import type { RiskReportParams } from "../lib/client";
 
 type ReportKind = "pdf" | "pptx";
 
 interface ReportDownloadsProps {
   dealIds: string[];
-  hurdleRate: number;
+  /** A flat hurdle rate (comparison and flat-ranking tabs)... */
+  hurdleRate?: number;
+  /** ...or the risk-adjusted ranking's inputs (risk-adjusted tab). */
+  risk?: RiskReportParams;
 }
 
 /**
@@ -14,7 +18,7 @@ interface ReportDownloadsProps {
  * state while the backend renders the file, and a failed download
  * surfaces the server's error inline instead of doing nothing.
  */
-export function ReportDownloads({ dealIds, hurdleRate }: ReportDownloadsProps) {
+export function ReportDownloads({ dealIds, hurdleRate, risk }: ReportDownloadsProps) {
   const [pending, setPending] = useState<ReportKind | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,7 +26,7 @@ export function ReportDownloads({ dealIds, hurdleRate }: ReportDownloadsProps) {
     setPending(kind);
     setError(null);
     try {
-      await downloadReport(kind, dealIds, hurdleRate);
+      await downloadReport(kind, dealIds, risk ?? hurdleRate ?? 0);
     } catch (err) {
       setError(`${kind.toUpperCase()} export failed. ${describeError(err)}`);
     } finally {

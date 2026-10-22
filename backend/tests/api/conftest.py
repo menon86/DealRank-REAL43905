@@ -4,11 +4,14 @@ the parent conftest), not the dev database.
 """
 
 from collections.abc import Generator
+from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.db import get_db
+from app.models.cap_rate_spread import CapRateSpread
 
 
 @pytest.fixture()
@@ -30,45 +33,8 @@ def client(db_session) -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
-# ---- shared by the chat tests (test_chat_*.py) ----
-
-CHAT_TREASURY = "0.046"
-
-
 @pytest.fixture()
-def chat_treasury(monkeypatch):
-    """Pins the Treasury lookup so no chat test touches the network. Returns a setter
-    for the source label ("fred" = live, "fallback" = the labelled default)."""
-    from datetime import date
-    from decimal import Decimal
-
-    from app.services.treasury import TreasuryQuote
-
-    state = {"source": "fred"}
-
-    def fake():
-        as_of = date(2026, 10, 1) if state["source"] != "fallback" else None
-        return TreasuryQuote(Decimal(CHAT_TREASURY), as_of, state["source"])
-
-    monkeypatch.setattr("app.api.risk_rank.get_treasury_10y", fake)
-    return state
-
-
-@pytest.fixture()
-def chat_deals(db_session, chat_treasury):
-    """The three seed deals plus their cap-rate spreads, via the ORM so no client is needed.
-    Hurdles at a 4.6% Treasury: student 7.90%, garden 6.61%, mid-rise 6.60%."""
-    from datetime import date
-    from decimal import Decimal
-
-    from app.models.cap_rate_spread import CapRateSpread
-    from app.models.deal import Deal
-    from tests.api.payloads import (
-        STUDENT_HOUSING_PAYLOAD,
-        SUBURBAN_GARDEN_PAYLOAD,
-        URBAN_MIDRISE_PAYLOAD,
-    )
-
+def spreads(db_session):
     for cls, bps, growth in [
         ("student_housing", 130, "0.0200"),
         ("suburban_garden", 61, "0.0140"),
@@ -84,6 +50,41 @@ def chat_deals(db_session, chat_treasury):
                 effective_date=date(2026, 8, 12),
             )
         )
+    db_session.flush()
+
+
+# ---- shared by the chat tests (test_chat_*.py) ----
+
+CHAT_TREASURY = "0.046"
+
+
+@pytest.fixture()
+def chat_treasury(monkeypatch):
+    """Pins the Treasury lookup so no chat test touches the network. Returns a dict whose
+    "source" ("fred" = live, "fallback" = the labelled default) the test can change."""
+    from app.services.treasury import TreasuryQuote
+
+    state = {"source": "fred"}
+
+    def fake():
+        as_of = date(2026, 10, 1) if state["source"] != "fallback" else None
+        return TreasuryQuote(Decimal(CHAT_TREASURY), as_of, state["source"])
+
+    monkeypatch.setattr("app.api.risk_rank.get_treasury_10y", fake)
+    return state
+
+
+@pytest.fixture()
+def chat_deals(db_session, spreads, chat_treasury):
+    """The three seed deals (ORM rows) with cap-rate spreads loaded.
+    Hurdles at a 4.6% Treasury: student 7.90%, garden 6.61%, mid-rise 6.60%."""
+    from app.models.deal import Deal
+    from tests.api.payloads import (
+        STUDENT_HOUSING_PAYLOAD,
+        SUBURBAN_GARDEN_PAYLOAD,
+        URBAN_MIDRISE_PAYLOAD,
+    )
+
     deals = {}
     for payload in (STUDENT_HOUSING_PAYLOAD, SUBURBAN_GARDEN_PAYLOAD, URBAN_MIDRISE_PAYLOAD):
         deal = Deal(**payload)

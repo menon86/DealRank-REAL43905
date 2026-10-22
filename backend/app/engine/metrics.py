@@ -137,6 +137,7 @@ def compute(deal: DealInputs) -> DealMetrics:
         preferred_equity=total_preferred_equity(deal),
         upfront_financing_costs=upfront_financing_costs(deal),
         preferred_equity_repayment=result.preferred_equity_repayment,
+        prepayment_penalties=result.prepayment_penalties,
         unlevered_irr_before_costs=unlevered_irr_before_costs,
         min_dscr=min(ratios) if ratios else None,
         debt_yield=(year_one.noi / debt_total) if debt_total > 0 else None,
