@@ -158,3 +158,19 @@ def capital_stack_rows(deal: Deal, metrics: DealMetrics) -> list[list[str]]:
         ]
     )
     return rows
+
+
+def capital_stack_segments(
+    deal: Deal, metrics: DealMetrics
+) -> list[tuple[str, LayerGroup, Decimal]]:
+    """(name, group, amount) per layer, then the common equity residual —
+    the numeric counterpart of capital_stack_rows, for drawing the stack."""
+    if deal.capital_stack:
+        layers = [engine_layer(layer) for layer in deal.capital_stack]
+        segments = [(layer_name(layer), layer.group, layer.amount) for layer in layers]
+    elif deal.loan_amount > 0:
+        segments = [("Senior loan", LayerGroup.SENIOR, deal.loan_amount)]
+    else:
+        segments = []
+    segments.append(("Common equity", LayerGroup.EQUITY, metrics.equity_invested))
+    return [seg for seg in segments if seg[2] > 0]

@@ -7,6 +7,7 @@ from the same computation as POST /rank/risk-adjusted
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 
 from app.api.ranking_data import RANKING_BASIS_NOTE, RankedEntry
@@ -17,6 +18,19 @@ from app.reports.formatting import number, percent
 # Label of the comparison-table row that decides rank.
 FLAT_BASIS_LABEL = "Unlevered IRR (ranking basis)"
 RISK_BASIS_LABEL = "Unlevered IRR before costs (ranking basis)"
+
+
+@dataclass(frozen=True)
+class PerfPoint:
+    """One ranked deal on the return-vs-hurdle chart."""
+
+    name: str
+    irr: Decimal
+    hurdle: Decimal
+
+    @property
+    def spread(self) -> Decimal:
+        return self.irr - self.hurdle
 
 
 @dataclass(frozen=True)
@@ -37,6 +51,56 @@ class ReportData:
     hurdle_headers: list[str] = field(default_factory=list)
     hurdle_rows: list[list[str]] = field(default_factory=list)
     sources_note: str = ""
+    # Ranked deals on the basis that decides rank, with each one's hurdle.
+    perf: list[PerfPoint] = field(default_factory=list)
+    # Plain-English findings for the executive summary.
+    takeaways: list[str] = field(default_factory=list)
+    generated_on: str = field(
+        default_factory=lambda: date.today().strftime("%B %d, %Y").replace(" 0", " ")
+    )
+
+
+def _bps(value: Decimal) -> str:
+    return f"{'+' if value >= 0 else '−'}{abs(value) * 10000:,.0f} bps"
+
+
+def _takeaways(
+    perf: list[PerfPoint],
+    total: int,
+    excluded: list[tuple[str, str]],
+    warnings: list[tuple[str, str]],
+) -> list[str]:
+    """The three or four sentences a reader should leave the summary with."""
+    points: list[str] = []
+    if perf:
+        top = perf[0]
+        verb = "clears" if top.spread >= 0 else "falls short of"
+        points.append(
+            f"{top.name} ranks first at {percent(top.irr)} unlevered IRR, which {verb} "
+            f"its {percent(top.hurdle)} hurdle by {_bps(top.spread).lstrip('+−')}."
+        )
+        if len(perf) > 1:
+            gap = top.spread - perf[1].spread
+            points.append(
+                f"It leads {perf[1].name} by {abs(gap) * 10000:,.0f} bps of spread to hurdle."
+            )
+        cleared = sum(1 for p in perf if p.spread >= 0)
+        points.append(
+            f"{cleared} of {len(perf)} ranked deal{'s' if len(perf) != 1 else ''} "
+            f"clear{'s' if len(perf) == 1 else ''} the hurdle."
+        )
+    if excluded:
+        points.append(
+            f"{len(excluded)} of {total} deal{'s' if total != 1 else ''} "
+            f"{'was' if len(excluded) == 1 else 'were'} excluded by the lender-style gates "
+            "and not ranked."
+        )
+    if warnings:
+        points.append(
+            f"{len(warnings)} underwriting flag{'s' if len(warnings) != 1 else ''} "
+            "on assumptions that flatter the return (see Ranking notes)."
+        )
+    return points
 
 
 SOURCES_NOTE = (
@@ -65,8 +129,15 @@ def flat_report(entries: list[RankedEntry], hurdle_rate: Decimal) -> ReportData:
                 spread,
             ]
         )
+    perf = [
+        PerfPoint(e.deal.name, e.metrics.unlevered_irr, hurdle_rate)
+        for e in entries
+        if e.metrics.unlevered_irr is not None and e.spread != Decimal("-Infinity")
+    ]
     return ReportData(
         mode="flat",
+        perf=perf,
+        takeaways=_takeaways(perf, len(entries), [], []),
         entries=entries,
         subtitle=f"Hurdle rate: {percent(hurdle_rate)}  |  {len(entries)} deals compared",
         ranking_headers=[
@@ -137,16 +208,25 @@ def risk_report(result: RiskRanking) -> ReportData:
         ]
         for r in [*result.ranked, *result.excluded]
     ]
+    perf = [
+        PerfPoint(r.deal.name, r.metrics.unlevered_irr_before_costs, r.hurdle.total)
+        for r in result.ranked
+        if r.metrics.unlevered_irr_before_costs is not None
+    ]
+    excluded = [(e.deal.name, e.reason) for e in result.excluded]
+    warnings = [(r.deal.name, w) for r in result.ranked for w in r.warnings]
     return ReportData(
         mode="risk",
+        perf=perf,
+        takeaways=_takeaways(perf, len(entries), excluded, warnings),
         entries=entries,
         subtitle=subtitle,
         ranking_headers=headers,
         ranking_rows=rows,
         basis_note=RISK_BASIS_NOTE,
         basis_label=RISK_BASIS_LABEL,
-        excluded=[(e.deal.name, e.reason) for e in result.excluded],
-        warnings=[(r.deal.name, w) for r in result.ranked for w in r.warnings],
+        excluded=excluded,
+        warnings=warnings,
         hurdle_headers=[
             "Deal",
             "Class",
