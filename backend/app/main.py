@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.chat import router as chat_router
 from app.api.deals import router as deals_router
 from app.api.market_check import router as market_check_router
 from app.api.rank import router as rank_router
@@ -35,3 +36,4 @@ app.include_router(reports_router)
 app.include_router(risk_rank_router)
 app.include_router(sensitivity_router)
 app.include_router(market_check_router)
+app.include_router(chat_router)

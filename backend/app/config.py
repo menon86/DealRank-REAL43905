@@ -7,7 +7,7 @@ here without updating that file too.
 from decimal import Decimal
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,6 +39,20 @@ class Settings(BaseSettings):
         "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
         "pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month={month}"
     )
+
+    # Chat assistant (app/api/chat.py). Any OpenAI-compatible endpoint works;
+    # switching provider is an env-var change only. The key is read here and
+    # nowhere else, and SecretStr keeps it out of reprs and logs. Unset key =
+    # chat reports "not configured" and the UI falls back to preset answers.
+    LLM_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    LLM_API_KEY: SecretStr = SecretStr("")
+    LLM_MODEL: str = "gemini-2.5-flash"
+    LLM_MAX_TOKENS: int = Field(default=1024, ge=64, le=8192)
+    CHAT_RATE_LIMIT_PER_MIN: int = Field(default=10, ge=1, le=600)
+
+    @property
+    def llm_configured(self) -> bool:
+        return bool(self.LLM_API_KEY.get_secret_value().strip() and self.LLM_BASE_URL.strip())
 
     @field_validator("DATABASE_URL")
     @classmethod
