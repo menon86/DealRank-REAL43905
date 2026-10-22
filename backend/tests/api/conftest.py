@@ -4,11 +4,14 @@ the parent conftest), not the dev database.
 """
 
 from collections.abc import Generator
+from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.db import get_db
+from app.models.cap_rate_spread import CapRateSpread
 
 
 @pytest.fixture()
@@ -28,3 +31,23 @@ def client(db_session) -> Generator[TestClient, None, None]:
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def spreads(db_session):
+    for cls, bps, growth in [
+        ("student_housing", 130, "0.0200"),
+        ("suburban_garden", 61, "0.0140"),
+        ("urban_midrise", 60, "0.0140"),
+    ]:
+        db_session.add(
+            CapRateSpread(
+                sub_asset_class=cls,
+                survey_source="test survey",
+                survey_quarter="2026H1",
+                spread_bps=bps,
+                assumed_stabilized_noi_growth=Decimal(growth),
+                effective_date=date(2026, 8, 12),
+            )
+        )
+    db_session.flush()

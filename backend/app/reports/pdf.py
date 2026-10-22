@@ -5,7 +5,6 @@ file is self-contained (a grader shouldn't need the live app to read it).
 
 import enum
 import io
-from decimal import Decimal
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
@@ -21,8 +20,9 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from app.api.ranking_data import RANKING_BASIS_NOTE, RankedEntry
+from app.api.ranking_data import RankedEntry
 from app.reports.capital_stack import CAPITAL_STACK_HEADERS, capital_stack_rows
+from app.reports.data import ReportData
 from app.reports.formatting import money, multiple, number, percent
 
 _STYLES = getSampleStyleSheet()
@@ -56,6 +56,10 @@ _ASSUMPTION_FIELDS: list[tuple[str, str]] = [
     ("monthly_rent_per_bed", "Monthly rent / bed"),
     ("vacancy_rate", "Vacancy rate"),
     ("other_income_annual", "Other income, annual"),
+    ("other_income_growth_rate", "Other income growth"),
+    ("credit_loss_rate", "Bad debt & concessions"),
+    ("management_fee_rate", "Management fee (of EGI)"),
+    ("replacement_reserve_per_unit_or_bed", "Replacement reserve / unit or bed"),
     ("opex_annual", "OpEx, annual"),
     ("expense_growth_rate", "Expense growth rate"),
     ("rent_growth_rate", "Rent growth rate"),
@@ -73,6 +77,9 @@ _ASSUMPTION_FIELDS: list[tuple[str, str]] = [
 ]
 
 _RATE_FIELDS = {
+    "other_income_growth_rate",
+    "credit_loss_rate",
+    "management_fee_rate",
     "vacancy_rate",
     "expense_growth_rate",
     "rent_growth_rate",
@@ -83,6 +90,7 @@ _RATE_FIELDS = {
 }
 
 _MONEY_FIELDS = {
+    "replacement_reserve_per_unit_or_bed",
     "monthly_rent_per_unit",
     "monthly_rent_per_bed",
     "other_income_annual",
@@ -111,7 +119,7 @@ def _format_assumption_value(field: str, value: object) -> str:
 
 # Letter width minus the 0.6" margins set in build_pdf_bytes.
 _CONTENT_WIDTH = 7.3 * inch
-_LABEL_COL_WIDTH = 1.6 * inch
+_LABEL_COL_WIDTH = 2.0 * inch
 
 _HEADER_CELL = ParagraphStyle(
     "DealRankHeaderCell",
@@ -136,10 +144,9 @@ _BODY_CELL = ParagraphStyle(
 _ACCENT_BG = colors.HexColor("#eef2fa")
 _SECTION_TEXT = colors.HexColor("#5b6474")
 
-_RANKING_BASIS_LABEL = "Unlevered IRR (ranking basis)"
 
-
-def _comparison_table(entries: list[RankedEntry]) -> Table:
+def _comparison_table(data: ReportData) -> Table:
+    entries = data.entries
     # Deal names and row labels are Paragraphs, not plain strings, so
     # they wrap inside their cell instead of overprinting the next column
     # once there are 4-5 deals on the page.
@@ -166,19 +173,37 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
     section("Year 1 waterfall")
     row("Gross potential rent", lambda e: money(year_one(e).gpr))
     row("Less: vacancy loss", lambda e: money(year_one(e).vacancy_loss))
+    row("Less: bad debt & concessions", lambda e: money(year_one(e).credit_loss))
     row("Effective gross income", lambda e: money(year_one(e).egi), bold=True)
     row("Less: operating expenses", lambda e: money(year_one(e).opex))
     row("Less: turnover expense", lambda e: money(year_one(e).turnover_expense))
+    row("Less: management fee", lambda e: money(year_one(e).management_fee))
     row("Year 1 NOI", lambda e: money(e.metrics.year_one_noi), bold=True)
+    row("Less: replacement reserves", lambda e: money(year_one(e).replacement_reserves))
     row("Debt service (all debt)", lambda e: money(year_one(e).debt_service))
     row("Preferred return", lambda e: money(year_one(e).preferred_distribution))
     section("Headline metrics")
-    ranking_basis_row = len(rows)
-    row(_RANKING_BASIS_LABEL, lambda e: percent(e.metrics.unlevered_irr), bold=True)
+    risk = data.mode == "risk"
+    row(
+        "Unlevered IRR (after closing & selling costs)" if risk else data.basis_label,
+        lambda e: percent(e.metrics.unlevered_irr),
+        bold=not risk,
+    )
+    if risk:
+        ranking_basis_row = len(rows)
+        row(
+            data.basis_label,
+            lambda e: percent(e.metrics.unlevered_irr_before_costs),
+            bold=True,
+        )
+    else:
+        ranking_basis_row = len(rows) - 1
     row("Levered IRR (reference)", lambda e: percent(e.metrics.levered_irr))
     row("Going-in cap rate", lambda e: percent(e.metrics.going_in_cap_rate))
     row("Year 1 senior DSCR", lambda e: number(e.metrics.year_one_senior_dscr))
     row("Year 1 combined DSCR", lambda e: number(e.metrics.year_one_dscr))
+    row("Lowest DSCR over the hold", lambda e: number(e.metrics.min_dscr))
+    row("Debt yield (NOI / debt)", lambda e: percent(e.metrics.debt_yield))
     row("Equity invested", lambda e: money(e.metrics.equity_invested))
     row("Cash-on-cash", lambda e: percent(e.metrics.cash_on_cash))
     row("Total distributions", lambda e: money(e.metrics.total_distributions))
@@ -217,44 +242,60 @@ def _comparison_table(entries: list[RankedEntry]) -> Table:
         2.5,
         colors.HexColor("#1f4b99"),
     )
+    # Compact rows: with the extra lines the comparison has to fit on one
+    # page next to the title, or the title would sit alone on page 1.
+    style.add("TOPPADDING", (0, 0), (-1, -1), 1.5)
+    style.add("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)
     table.setStyle(style)
     return table
 
 
-def _ranking_table(entries: list[RankedEntry]) -> Table:
+def _ranking_table(data: ReportData) -> Table:
+    count = len(data.ranking_headers)
     rows: list[list] = [
         [
-            Paragraph("Rank", _HEADER_CELL),
-            Paragraph("Deal", _HEADER_CELL),
-            Paragraph(_RANKING_BASIS_LABEL, _HEADER_CELL_RIGHT),
-            Paragraph("Levered IRR (reference)", _HEADER_CELL_RIGHT),
-            Paragraph("Spread vs. hurdle", _HEADER_CELL_RIGHT),
+            Paragraph(header, _HEADER_CELL if i < 2 else _HEADER_CELL_RIGHT)
+            for i, header in enumerate(data.ranking_headers)
         ]
     ]
-    for entry in entries:
-        spread_str = (
-            "n/a (non-converging)"
-            if entry.spread == Decimal("-Infinity")
-            else f"{'+' if entry.spread >= 0 else ''}{percent(entry.spread)}"
-        )
-        rows.append(
-            [
-                f"#{entry.rank}",
-                Paragraph(escape(entry.deal.name), _BODY_CELL),
-                percent(entry.metrics.unlevered_irr),
-                percent(entry.metrics.levered_irr),
-                spread_str,
-            ]
-        )
-    table = Table(
-        rows,
-        colWidths=[0.5 * inch, 2.8 * inch, 1.4 * inch, 1.3 * inch, 1.3 * inch],
-        repeatRows=1,
-    )
+    for cells in data.ranking_rows:
+        rows.append([cells[0], Paragraph(escape(cells[1]), _BODY_CELL)] + cells[2:])
+    rest = (_CONTENT_WIDTH - 3.3 * inch) / (count - 2)
+    table = Table(rows, colWidths=[0.5 * inch, 2.8 * inch] + [rest] * (count - 2), repeatRows=1)
     style = TableStyle(_TABLE_STYLE.getCommands())
     style.add("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold")
     style.add("FONTNAME", (4, 1), (4, -1), "Helvetica-Bold")
     table.setStyle(style)
+    return table
+
+
+def _hurdle_table(data: ReportData) -> Table:
+    rows: list[list] = [
+        [
+            Paragraph(h, _HEADER_CELL if i in (0, 1, 6) else _HEADER_CELL_RIGHT)
+            for i, h in enumerate(data.hurdle_headers)
+        ]
+    ]
+    for cells in data.hurdle_rows:
+        rows.append(
+            [Paragraph(escape(cells[0]), _BODY_CELL), Paragraph(escape(cells[1]), _BODY_CELL)]
+            + cells[2:6]
+            + [Paragraph(escape(cells[6]), _BODY_CELL)]
+        )
+    table = Table(
+        rows,
+        colWidths=[
+            1.5 * inch,
+            0.9 * inch,
+            0.6 * inch,
+            0.7 * inch,
+            0.7 * inch,
+            0.6 * inch,
+            2.3 * inch,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(_TABLE_STYLE)
     return table
 
 
@@ -318,7 +359,8 @@ def _capital_stack_table(entry: RankedEntry) -> Table:
     return table
 
 
-def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
+def build_pdf_bytes(data: ReportData) -> bytes:
+    entries = data.entries
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -329,40 +371,55 @@ def build_pdf_bytes(entries: list[RankedEntry], hurdle_rate: Decimal) -> bytes:
         rightMargin=0.6 * inch,
     )
 
+    ranking_block = [
+        Paragraph("Ranking", _H2),
+        _ranking_table(data),
+        Spacer(1, 0.15 * inch),
+        Paragraph(escape(data.basis_note), _NOTE),
+    ]
+    for name, reason in data.excluded:
+        ranking_block.append(
+            Paragraph(f"<b>Excluded:</b> {escape(name)} — {escape(reason)}", _NOTE)
+        )
+    for name, warning in data.warnings:
+        ranking_block.append(Paragraph(f"<b>Note:</b> {escape(name)} — {escape(warning)}", _NOTE))
+
     # Each section is one KeepTogether block — heading, table and its note
     # — so a page break can only fall between sections, never between a
     # heading and its table or through the middle of a table. A block too
     # tall for a whole page still splits, with its header row repeated.
     story: list = [
         Paragraph("DealRank — Deal Comparison &amp; Ranking", _TITLE),
-        Paragraph(
-            f"Hurdle rate: {percent(hurdle_rate)} &nbsp;|&nbsp; {len(entries)} deals compared",
-            _SUBTITLE,
-        ),
+        Paragraph(escape(data.subtitle), _SUBTITLE),
         Spacer(1, 0.25 * inch),
         KeepTogether(
             [
                 Paragraph("Comparison", _H2),
-                _comparison_table(entries),
+                _comparison_table(data),
                 Spacer(1, 0.2 * inch),
                 Paragraph(
-                    "Both IRRs are shown. Ranking (below) uses unlevered IRR only, against the "
-                    "hurdle rate above; levered IRR is for reference and is never sorted on.",
+                    "Both IRRs are shown. Ranking (below) uses the unlevered IRR only; "
+                    "levered IRR is for reference and is never sorted on.",
                     _NOTE,
                 ),
             ]
         ),
         Spacer(1, 0.3 * inch),
-        KeepTogether(
-            [
-                Paragraph("Ranking", _H2),
-                _ranking_table(entries),
-                Spacer(1, 0.15 * inch),
-                Paragraph(RANKING_BASIS_NOTE, _NOTE),
-            ]
-        ),
+        KeepTogether(ranking_block),
         Spacer(1, 0.3 * inch),
     ]
+    if data.hurdle_rows:
+        story.append(
+            KeepTogether(
+                [
+                    Paragraph("How each hurdle was built", _H2),
+                    _hurdle_table(data),
+                    Spacer(1, 0.15 * inch),
+                    Paragraph(escape(data.sources_note), _NOTE),
+                ]
+            )
+        )
+        story.append(Spacer(1, 0.3 * inch))
 
     # Assumptions sit two deals side by side. Each pair is its own
     # one-row table, and a table row never splits across pages, so a deal's
