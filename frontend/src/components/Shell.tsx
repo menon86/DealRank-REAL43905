@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 
-export type Tab = "deals" | "compare" | "rank" | "risk" | "sensitivity" | "market";
+export type Tab = "home" | "deals" | "compare" | "rank" | "risk" | "sensitivity" | "market";
 
-const ICONS: Record<Tab, string> = {
+export const ICONS: Record<Tab, string> = {
+  home: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10",
   deals: "M3 21V8l7-5 7 5v13M3 21h14M21 21V11l-4-2M7 12h2M7 16h2M13 12h1M13 16h1",
   compare: "M4 4h6v16H4zM14 4h6v16h-6z",
   rank: "M5 20V12M12 20V4M19 20v-6",
@@ -13,6 +14,7 @@ const ICONS: Record<Tab, string> = {
 };
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "home", label: "Home" },
   { id: "deals", label: "Deals" },
   { id: "compare", label: "Compare" },
   { id: "rank", label: "Rank" },
@@ -63,7 +65,7 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
       </aside>
 
       <main className="app-main">
-        <h1 className="page-title">{current?.label}</h1>
+        {activeTab !== "home" && <h1 className="page-title">{current?.label}</h1>}
         {children}
       </main>
     </div>
