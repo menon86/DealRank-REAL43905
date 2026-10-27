@@ -85,7 +85,7 @@ API). **Not yet written:** the data provenance memo documenting the spread sourc
   - Full amortizing vs. Interest-Only (I/O) periods (e.g., 1-5 years I/O followed by amortization).
   - Fixed-rate vs. floating rate (SOFR + spread) structures with optional rate caps.
   - Mezzanine / second-lien financing tranches and balloon payment modeling at loan maturity.
-- **Excel Underwriting & Financing Ingestion**: Standardized Excel (`.xlsx`) and CSV import for property underwriting assumptions, unit mix matrices, and financing schedules.
+- **Spreadsheet import**: a formatted Excel underwriting template, and import from the template or your own `.xlsx` / `.csv` model, with a review screen that shows where each value came from before the deal form is filled.
 - **Risk & Ranking Enhancements**: 10-Year Treasury + sub-class cap rate spread hurdles, hard DSCR gate enforcement (~1.20x-1.25x), preference-weighted ranking, and sensitivity sliders.
 
 **Permanently out of scope:** any asset class beyond residential multifamily sub-types, automated OM/PDF OCR scraping, live CoStar/licensed comp data, portfolio-level aggregation, development ground-up construction feasibility.

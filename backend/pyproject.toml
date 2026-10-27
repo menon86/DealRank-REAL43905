@@ -23,6 +23,12 @@ dependencies = [
     # Chat assistant: the OpenAI client against any OpenAI-compatible endpoint
     # (Gemini by default; Groq, OpenRouter, Ollama via env vars).
     "openai>=1.50,<2.0",
+    # Spreadsheet import and the .xlsx template (app/spreadsheet/). defusedxml
+    # is picked up by openpyxl to parse uploaded workbooks safely;
+    # python-multipart is FastAPI's file-upload parser.
+    "openpyxl>=3.1,<4.0",
+    "defusedxml>=0.7,<0.8",
+    "python-multipart>=0.0.18,<0.1",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +63,13 @@ select = ["E", "F", "I", "UP", "B"]
 # FastAPI's Depends()/Query()/etc. are meant to be called in argument
 # defaults — that's the framework's dependency-injection idiom, not the
 # mutable-default-argument bug B008 otherwise flags.
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.File",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

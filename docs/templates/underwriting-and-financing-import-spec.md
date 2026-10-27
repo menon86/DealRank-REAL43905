@@ -1,134 +1,145 @@
-# DealRank Excel Underwriting & Financing Ingestion Specification
+# DealRank spreadsheet import
 
-This specification defines the standardized format for importing property underwriting assumptions, granular unit mixes, asset-class custom drivers, and financing structures into DealRank via `.xlsx`, `.xls`, or `.csv` workbooks.
-
----
-
-## 1. Workbook Structure Overview
-
-A standard DealRank Underwriting Workbook contains four structured worksheets (or four identifiable tables in a single worksheet):
-
-1. **`Property_Details`**: Core asset identification, valuation, acquisition costs, hold horizon, and macroeconomic growth rates.
-2. **`Unit_Mix`**: Granular breakdown of units across Studio, 1-Bed, 2-Bed, 3-Bed, and 4+ Bed configurations.
-3. **`Custom_Inputs`**: Housing-type specific operational drivers (parking spaces/fees, storage, pet rent, tech packages, retail).
-4. **`Financing`**: Debt capital stack, loan types (amortizing, interest-only, floating rate), amortization schedules, and loan terms.
+How deal inputs get from a spreadsheet into the New deal form: the downloadable template, and
+importing a workbook in any layout. The field list below is generated from
+`backend/app/spreadsheet/fields.py`, which drives both the template and the importer.
 
 ---
 
-## 2. Worksheet Schemas & Data Dictionaries
+## 1. Template
 
-### Sheet 1: `Property_Details`
+`GET /deals/import/template` returns `dealrank_underwriting_template.xlsx`, one workbook with:
 
-| Column Header | Data Type | Required | Default | Description / Validation | Example |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `deal_name` | String(255) | Yes | — | Human-readable property name | *Northside Garden Apartments* |
-| `sub_asset_class` | String(50) | Yes | — | Must be: `student_housing`, `suburban_garden`, or `urban_midrise` | `suburban_garden` |
-| `leasing_mode` | String(20) | Yes | `per_unit` | Must be: `per_unit` or `per_bed` | `per_unit` |
-| `purchase_price` | Decimal | Yes | — | Acquisition purchase price ($) | `28500000.00` |
-| `closing_costs` | Decimal | Yes | 2% of price | Transaction & legal closing costs ($) | `570000.00` |
-| `hold_period_years` | Integer | Yes | `10` | Planned investment holding period (1–30 years) | `7` |
-| `exit_cap_rate` | Decimal / % | Yes | — | Underwritten forward-NOI exit cap rate (e.g. `0.055` or `5.5%`) | `0.055` |
-| `selling_costs_rate` | Decimal / % | Yes | `0.02` | Broker commission and transfer taxes at sale (e.g. `2.0%`) | `0.02` |
-| `vacancy_rate` | Decimal / % | Yes | `0.05` | General economic and credit vacancy rate (e.g. `5.0%`) | `0.05` |
-| `rent_growth_rate` | Decimal / % | Yes | `0.03` | Compounding annual gross rent growth (e.g. `3.0%`) | `0.03` |
-| `expense_growth_rate` | Decimal / % | Yes | `0.03` | Compounding annual OpEx inflation (e.g. `3.0%`) | `0.03` |
-| `base_opex_annual` | Decimal | Yes | — | Base year operating expenses excluding turnover ($) | `950000.00` |
-| `annual_turnover_rate` | Decimal / % | Yes | — | Percentage of units/beds that turn annually (e.g. `55%`) | `0.55` |
-| `turnover_cost_per_turn` | Decimal | Yes | — | Make-ready and re-leasing cost per turn ($) | `900.00` |
+- **Instructions**: how to fill it in and import it.
+- **Property**: deal, revenue, expense, exit and optional ancillary-income inputs, one per row
+  (Field, Value, Unit, Notes).
+- **Unit Mix**: one row per unit type, with a total row.
+- **Financing**: the senior loan, plus optional mezzanine debt and preferred equity.
+- **Lists** (hidden): the options behind the dropdowns.
 
----
+Input cells are shaded; money, percent and count cells carry Excel number formats; property type,
+leasing mode, loan type, rate type and recourse are dropdowns. Sample values describe a suburban
+garden deal for the user to overwrite.
 
-### Sheet 2: `Unit_Mix`
+## 2. Import
 
-Each row represents a distinct unit tier. The sum of `units` and `monthly_rent` establishes the baseline Gross Potential Rent (GPR).
+`POST /deals/import` takes one file (multipart field `file`): `.xlsx`, `.xlsm`, `.csv` or `.tsv`,
+up to 5 MB. Old `.xls` files are refused with a message to re-save as `.xlsx`. Formulas are read
+from the values Excel last saved. Each sheet is scanned up to 400 rows by 40 columns, and sheets
+named Instructions or Lists are skipped.
 
-| Column Header | Data Type | Required | Description / Validation | Example |
-| :--- | :--- | :--- | :--- | :--- |
-| `unit_type` | String | Yes | `studio`, `1bed`, `2bed`, `3bed`, or `4bed_plus` | `2bed` |
-| `unit_count` | Integer | Yes | Number of units in this tier ($> 0$) | `80` |
-| `beds_per_unit` | Integer | Yes | Number of beds per unit (default 1 for Studio/1Bed, 2 for 2Bed, etc.) | `2` |
-| `avg_sqft` | Integer | Optional | Average unit square footage | `950` |
-| `monthly_rent` | Decimal | Yes | Monthly rent per unit (or per bed in per-bed leasing mode) | `1650.00` |
+Import **never creates or changes a deal**. It returns a proposal; the frontend shows it on a
+review screen, the user confirms or fixes each value, and only then is the form filled. The
+normal `POST /deals` validation applies when the deal is saved.
 
-#### Sample Unit Mix Matrix:
-```csv
-unit_type,unit_count,beds_per_unit,avg_sqft,monthly_rent
-studio,20,1,550,1150.00
-1bed,60,1,720,1350.00
-2bed,80,2,980,1650.00
-3bed,20,3,1250,2050.00
-```
-*Derived Totals:* 180 Units | 280 Beds | $277,000 Monthly GPR | $3,324,000 Annual GPR.
+### How values are found
 
----
+1. **Unit mix table.** A header row naming at least two of units, beds, square feet and rent
+   (for example `Floor Plan | # Units | Avg SF | Market Rent`) is read down to the first blank or
+   total/average row. Beds per unit are guessed from the unit type name ("Studio", "2 Bed",
+   "2x2", "2BR") when there's no beds column.
+2. **Label/value pairs.** Every other text cell is compared with each field's labels below. The
+   value is the first filled cell to the right (skipping unit cells like `%` or `years`), or the
+   cell directly below. An exact label match is marked **Matched**; a label that only contains
+   one (for example "Total Operating Expenses (Yr 1)") is marked **Check**. One-word labels only
+   match exactly, and a label with "per unit" / "per sf" isn't taken as a total, so "Price per
+   Unit" isn't read as the purchase price. Each field takes its best label and each cell is used
+   once.
+3. **Values.** `$`, thousands separators, `(1,200)` negatives and `k` / `M` suffixes are handled.
+   Percent fields accept Excel percent cells, `5.5%` text, or a bare fraction (`0.055` is read as
+   5.5% and flagged for checking). An interest-only period labelled in years is converted to
+   months; a spread entered as a percent is converted to basis points.
 
-### Sheet 3: `Custom_Inputs`
+### Response
 
-Specific operational drivers tailored to housing types. Fields not applicable to a selected housing type may be left blank or omitted.
+- `fields`: every importable field, with `value` (in form units: percents as whole numbers),
+  `source` (sheet, cell and the label it was found next to), `confidence` and an optional `note`.
+- `candidates`: every label/value pair in the workbook, so the user can point a field at a
+  different cell.
+- `unit_mix`: the detected table (all columns, raw rows) and which column was matched to each
+  unit mix attribute, so the user can remap columns.
+- `warnings`: shown at the top of the review screen.
 
-| Field Name | Target Sub-Asset Class | Data Type | Description |
+An unreadable file returns 422 with a message for the user.
+
+## 3. Fields
+
+### Property tab
+
+| Template label | Key | Unit | Also recognized as |
 | :--- | :--- | :--- | :--- |
-| `surface_parking_stalls` | `suburban_garden` | Integer | Total rentable surface parking spaces |
-| `covered_parking_stalls` | `suburban_garden` | Integer | Total covered carports / detached garages |
-| `parking_monthly_rate` | `suburban_garden`, `urban_midrise` | Decimal | Monthly fee per parking space ($) |
-| `parking_occupancy_rate` | All | Decimal / % | Underwritten parking utilization (e.g. `90%`) |
-| `garage_parking_stalls` | `urban_midrise` | Integer | Total structured/subterranean parking stalls |
-| `storage_units` | `suburban_garden`, `urban_midrise` | Integer | Number of rentable tenant storage units |
-| `storage_monthly_fee` | `suburban_garden`, `urban_midrise` | Decimal | Monthly fee per storage unit ($) |
-| `pet_fee_monthly` | `suburban_garden` | Decimal | Average monthly pet rent per participating unit ($) |
-| `pet_penetration_rate` | `suburban_garden` | Decimal / % | Percentage of units paying pet rent (e.g. `35%`) |
-| `rubs_recovery_pct` | `suburban_garden` | Decimal / % | Ratio Utility Billing System recovery rate on utilities |
-| `tech_package_monthly_fee` | `student_housing` | Decimal | High-speed Wi-Fi / smart tech fee per bed ($) |
-| `furniture_package_monthly_fee`| `student_housing` | Decimal | Furnished unit package fee per bed ($) |
-| `commercial_retail_sqft` | `urban_midrise` | Integer | Ground-floor retail rentable square feet |
-| `commercial_rent_sqft_annual` | `urban_midrise` | Decimal | Annual triple-net (NNN) rent per square foot ($) |
+| Deal name | `name` | — | deal_name, property name, property, project name, asset name, name |
+| Property type | `sub_asset_class` | — | sub asset class, asset class, asset type, product type; options: Suburban garden (`suburban_garden`), Student housing (`student_housing`), Urban mid-rise (`urban_midrise`) |
+| Leasing mode | `leasing_mode` | — | lease type, leased by; options: Per unit (`per_unit`), Per bed (`per_bed`) |
+| Purchase price | `purchase_price` | $ | acquisition price, contract price, price, purchase |
+| Closing costs | `closing_costs` | $ | closing cost, transaction costs, acquisition costs, acquisition fees |
+| Hold period | `hold_period_years` | years | holding period, hold years, hold, investment horizon, hold period years |
+| Number of units | `unit_count` | units | units, unit count, total units, no of units, number units |
+| Average monthly rent per unit | `monthly_rent_per_unit` | $/month | average rent, avg rent, average monthly rent, avg monthly rent, rent per unit, monthly rent, in place rent, average rent per unit |
+| Number of beds | `bed_count` | beds | beds, bed count, total beds |
+| Average monthly rent per bed | `monthly_rent_per_bed` | $/month | rent per bed, monthly rent per bed, average rent per bed |
+| Vacancy rate | `vacancy_rate_pct` | % | vacancy, economic vacancy, physical vacancy, vacancy loss, vacancy pct |
+| Credit loss | `credit_loss_rate_pct` | % of rent | credit loss rate, bad debt, collection loss |
+| Rent growth | `rent_growth_rate_pct` | % per year | rent growth rate, rental growth, annual rent growth, rent escalation |
+| Other income | `other_income_annual` | $/year | ancillary income, misc income, miscellaneous income, other revenue |
+| Other income growth | `other_income_growth_rate_pct` | % per year | other income growth rate |
+| Operating expenses | `opex_annual` | $/year | opex, total operating expenses, annual operating expenses, total expenses, annual opex |
+| Expense growth | `expense_growth_rate_pct` | % per year | expense growth rate, opex growth, expense inflation |
+| Management fee | `management_fee_rate_pct` | % of income | management fee rate, mgmt fee, property management fee |
+| Replacement reserves | `replacement_reserve_per_unit_or_bed` | $/unit/year | replacement reserve, reserves, capex reserve, reserves per unit |
+| Turnover cost | `turnover_cost_per_unit_or_bed` | $ per turn | turnover_cost, make ready cost, make ready, turn cost |
+| Turnover rate | `annual_turnover_rate_pct` | % per year | turnover_rate_pct, annual turnover, annual turnover rate |
+| Lease expiration month | `lease_expiration_month` | 1-12 | lease expiry month, lease turn month |
+| Exit cap rate | `exit_cap_rate_pct` | % | exit cap, terminal cap rate, reversion cap rate, residual cap rate |
+| Selling costs | `selling_costs_rate_pct` | % of sale price | selling cost, cost of sale, costs of sale, disposition costs |
 
----
+### Property tab: ancillary income (optional)
 
-### Sheet 4: `Financing`
+| Template label | Key | Unit | Also recognized as |
+| :--- | :--- | :--- | :--- |
+| Surface parking stalls | `surface_parking_stalls` | stalls | surface parking, surface stalls |
+| Covered parking stalls | `covered_parking_stalls` | stalls | covered parking, carports |
+| Parking rate | `parking_monthly_rate` | $/stall/month | parking monthly rate, parking fee |
+| Parking occupancy | `parking_occupancy_pct` | % | parking occupancy rate |
+| Storage units | `storage_units` | units | storage |
+| Storage fee | `storage_monthly_fee` | $/month | storage monthly fee, storage rent |
+| Pet rent | `pet_monthly_fee` | $/month | pet monthly fee, pet fee |
+| Units with pets | `pet_penetration_pct` | % | pet penetration, pet penetration pct |
+| Tech package fee | `tech_package_monthly_fee` | $/bed/month | tech package, technology fee |
+| Furniture package fee | `furniture_package_monthly_fee` | $/bed/month | furniture package, furniture fee |
+| Garage parking stalls | `garage_parking_stalls` | stalls | garage stalls, structured parking stalls |
+| Garage parking rate | `garage_monthly_rate` | $/stall/month | garage monthly rate, garage rate |
+| Retail square feet | `commercial_retail_sqft` | sq ft | commercial retail sqft, retail sf, commercial sf, retail area |
+| Retail rent | `commercial_rent_sqft_annual` | $/sq ft/year | commercial rent sqft annual, retail rent psf, commercial rent |
 
-Builds the deal's capital stack (see `docs/methodology.md` section 3): one senior loan, plus a
-mezzanine and a preferred equity layer when their amounts are above zero. Equity layers already
-on the form are kept. This is what the deal form's **Template (Financing)** download contains
-and what **Import Financing** reads.
+### Financing tab
 
-| Column Header | Data Type | Required | Default | Description / Validation | Example |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `senior_loan_type` | String | No | `other_senior` | A senior layer type: `agency_fannie_mae`, `agency_freddie_mac`, `hud_223f`, `hud_221d4`, `bank_credit_union`, `life_company`, `cmbs`, `bridge_debt_fund`, `construction`, `loan_assumption`, `seller_financing` | `agency_fannie_mae` |
-| `loan_amount` | Decimal | Yes | — | Senior loan principal ($) | `18500000.00` |
-| `rate_type` | String | No | `fixed` | `fixed` or `floating` | `fixed` |
-| `interest_rate_pct` | Decimal | Fixed only | — | Annual rate in percent | `6.25` |
-| `index_name` | String | No | `SOFR` | Floating-rate index name | `SOFR` |
-| `index_rate_pct` | Decimal | Floating only | — | Index rate in percent | `4.30` |
-| `spread_bps` | Decimal | Floating only | — | Lender spread in basis points | `275` |
-| `io_months` | Integer | No | `0` | Interest-only months; can't exceed the term | `24` |
-| `amortization_years` | Integer | No | `30` | Amortization after I/O runs over the remaining months | `30` |
-| `term_years` | Integer | No | blank | Maturity; a term inside the hold is repaid as a balloon | `10` |
-| `recourse` | String | No | blank | `recourse` or `non_recourse` | `non_recourse` |
-| `origination_fee_pct` | Decimal | No | `0` | Paid at closing out of equity | `1.0` |
-| `rate_cap_cost` | Decimal | No | `0` | Floating only; paid at closing ($) | `0` |
-| `mezzanine_loan_amount` | Decimal | No | `0` | Adds an interest-only mezzanine layer when > 0 | `0.00` |
-| `mezzanine_interest_rate_pct` | Decimal | No | `0` | Mezzanine rate in percent | `11.0` |
-| `preferred_equity_amount` | Decimal | No | `0` | Adds a preferred equity layer when > 0 | `0.00` |
-| `preferred_return_pct` | Decimal | No | `0` | Annual preferred return in percent | `9.0` |
+| Template label | Key | Unit | Also recognized as |
+| :--- | :--- | :--- | :--- |
+| Senior loan type | `senior_loan_type` | — | loan type, lender, lender type, debt type, loan program; options: Agency - Fannie Mae (`agency_fannie_mae`), Agency - Freddie Mac (`agency_freddie_mac`), HUD/FHA 223(f) (`hud_223f`), HUD/FHA 221(d)(4) (`hud_221d4`), Bank / credit union (`bank_credit_union`), Life insurance company (`life_company`), CMBS / conduit (`cmbs`), Bridge / debt fund (`bridge_debt_fund`), Construction loan (`construction`), Loan assumption (`loan_assumption`), Seller financing (`seller_financing`), Other (`other_senior`) |
+| Loan amount | `loan_amount` | $ | senior loan amount, loan, senior loan, mortgage amount, debt amount, loan proceeds, first mortgage |
+| Rate type | `rate_type` | — | interest rate type, loan structure, fixed or floating; options: Fixed (`fixed`), Floating (`floating`) |
+| Interest rate | `interest_rate_pct` | % | rate, coupon, note rate, loan rate, senior interest rate |
+| Index | `index_name` | — | index name, rate index |
+| Index rate | `index_rate_pct` | % | sofr, sofr rate, sofr_base_rate_pct, base rate |
+| Spread | `spread_bps` | bps | spread bps, margin, lender spread |
+| Interest-only period | `io_months` | months | io months, io period, interest only months, interest only, io |
+| Amortization | `amortization_years` | years | amortization period, amortization years, amort, amortization term |
+| Loan term | `term_years` | years | term, maturity, term years, loan_term_years, loan maturity |
+| Recourse | `recourse` | — | options: Non-recourse (`non_recourse`), Recourse (`recourse`) |
+| Origination fee | `origination_fee_pct` | % of loan | loan fee, financing fee, origination, lender fee |
+| Rate cap cost | `rate_cap_cost` | $ | interest rate cap, rate cap |
+| Mezzanine loan amount | `mezzanine_loan_amount` | $ | mezzanine, mezz loan, mezz, mezzanine debt |
+| Mezzanine interest rate | `mezzanine_interest_rate_pct` | % | mezz rate, mezzanine rate |
+| Preferred equity amount | `preferred_equity_amount` | $ | preferred equity, pref equity |
+| Preferred return | `preferred_return_pct` | % | pref return, preferred equity return |
 
-The earlier template's `loan_structure`, `io_period_years`, `sofr_base_rate_pct` and
-`loan_term_years` columns are still read for backward compatibility.
+### Unit Mix tab
 
----
-
-## 3. Ingestion & Validation Pipeline
-
-When an Excel workbook is uploaded via `POST /deals/import/excel`:
-
-1. **Header Normalization**: Headers are trimmed, lowercased, and mapped to internal Pydantic models.
-2. **Type Coercion & Discipline**:
-   - Percentages entered as whole numbers (e.g. `5.5%` or `5.5`) are automatically converted to decimal fractions (`0.055`).
-   - Currency strings (e.g. `$28,500,000`) are stripped and parsed directly into `Decimal`.
-3. **Cross-Field Integrity**:
-   - Verifies that `unit_count` in `Property_Details` matches the sum of units in `Unit_Mix`.
-   - Rejects files with negative rents, negative unit counts, or interest rates $> 25\%$.
-   - Validates that `io_months` does not exceed the term, and the capital stack rules in `docs/methodology.md` section 3.
-4. **Error Reporting**:
-   - If validation fails, returns HTTP 422 with a structured error payload detailing:
-     `{"sheet": "Unit_Mix", "row": 3, "column": "monthly_rent", "error": "Rent must be greater than zero"}`.
+| Column | Also recognized as |
+| :--- | :--- |
+| Unit type | unit_mix, type, floor plan, floorplan, plan, unit mix, description |
+| Units | unit count, number of units, no of units, count, qty, total units |
+| Beds per unit | beds, bedrooms, br, bd, beds per unit, bedrooms per unit |
+| Avg sq ft | sq ft, sqft, sf, avg sf, average sf, square feet, size, unit sf, nrsf |
+| Monthly rent | rent, avg rent, average rent, market rent, in place rent, asking rent, rent per unit |
