@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ComparisonTable } from "./components/ComparisonTable";
 import { DealForm } from "./components/DealForm";
 import { DealList } from "./components/DealList";
+import { HomeView } from "./components/HomeView";
 import { MarketCheckView } from "./components/MarketCheckView";
 import { RankingView } from "./components/RankingView";
 import { RiskRankingView } from "./components/RiskRankingView";
@@ -16,7 +17,7 @@ import type { DealCreate, DealOut, MetricsOut, RankedDealOut } from "./lib/types
 const DEFAULT_HURDLE_RATE = 0.08;
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("deals");
+  const [activeTab, setActiveTab] = useState<Tab>("home");
   const [deals, setDeals] = useState<DealOut[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingDeal, setEditingDeal] = useState<DealOut | null>(null);
@@ -174,6 +175,16 @@ export function App() {
 
   return (
     <Shell activeTab={activeTab} onTabChange={setActiveTab}>
+      {activeTab === "home" && (
+        <HomeView
+          deals={deals}
+          selectedCount={selectedIds.length}
+          hurdleRate={hurdleRate}
+          rankedDeals={rankedDeals}
+          onNavigate={setActiveTab}
+        />
+      )}
+
       {activeTab === "deals" && (
         <>
           {actionError && (
