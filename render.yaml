@@ -1,7 +1,7 @@
 # Render Blueprint. See docs/build-plan.md 7.3 and the README's "Deploy to
 # Render" step. In the Render dashboard: New + -> Blueprint -> point at
-# this repo. Provisions the API, the static frontend, and a managed
-# Postgres instance from this one file.
+# this repo. Provisions the API and the static frontend from this one
+# file; the database lives on Neon (see below).
 #
 # fromService cross-references below (CORS_ORIGINS, VITE_API_BASE_URL)
 # resolve to each service's Render-assigned hostname, which does NOT
@@ -12,12 +12,9 @@
 # these two values in the dashboard after the first deploy (the README's
 # "Deploy to Render" step says this too).
 
-databases:
-  - name: dealrank-db
-    databaseName: dealrank
-    user: dealrank
-    plan: free
-    postgresMajorVersion: "16"
+# Postgres is hosted on Neon (free tier, no expiry) rather than Render:
+# Render's free Postgres is deleted after 30 days. DATABASE_URL below is
+# set by hand in the dashboard to the Neon connection string.
 
 services:
   - type: web
@@ -36,9 +33,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: DATABASE_URL
-        fromDatabase:
-          name: dealrank-db
-          property: connectionString
+        sync: false
       - key: APP_ENV
         value: production
       - key: APP_NAME

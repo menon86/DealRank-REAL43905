@@ -160,9 +160,12 @@ The frontend defaults to `http://localhost:8000` for the API — copy `frontend/
    git tag deliverable-2
    git push origin deliverable-2
    ```
-4. **Deploy to Render**: [`render.yaml`](render.yaml) defines the API service, the static
-   frontend, and a managed Postgres instance. In the Render dashboard, "New +" -> "Blueprint",
-   point it at this repo, and Render provisions all three from the file. After the first deploy,
+4. **Deploy to Render**: [`render.yaml`](render.yaml) defines the API service and the static
+   frontend. Postgres is hosted on [Neon](https://neon.tech) (free tier, no expiry; Render's
+   free Postgres is deleted after 30 days): create a Neon project, and paste its connection
+   string into the API's `DATABASE_URL` when the Blueprint prompts for it. The first deploy
+   runs the migrations and seeds on the empty database. In the Render dashboard, "New +" ->
+   "Blueprint", point it at this repo, and Render provisions the two services. After the first deploy,
    set `VITE_API_BASE_URL` (frontend) to the deployed API's URL and `CORS_ORIGINS` (API) to the
    deployed frontend's URL — `render.yaml` wires these automatically via Render's `fromService`
    references, but double-check them in the dashboard if either service is renamed.
