@@ -391,3 +391,56 @@ export interface GeographyOut {
   source: string;
   latest_period: string;
 }
+
+// ---------------------------------------------------------------------------
+// Spreadsheet import (POST /deals/import, backend/app/spreadsheet/schemas.py)
+// ---------------------------------------------------------------------------
+
+export type ImportFieldKind = "money" | "percent" | "integer" | "number" | "text" | "choice";
+
+export interface ImportField {
+  /** A deal form key, or a financing key read by the form's financing import. */
+  key: string;
+  label: string;
+  section: "property" | "ancillary" | "financing";
+  group: string;
+  kind: ImportFieldKind;
+  unit: string;
+  choices: { value: string; label: string }[];
+  /** In the form's units: percents are whole numbers ("5.75" = 5.75%). */
+  value: string | null;
+  source: { sheet: string; cell: string; label: string } | null;
+  candidate_id: string | null;
+  confidence: "high" | "medium" | null;
+  note: string | null;
+}
+
+/** A label with a value beside it, which the user can point a field at. */
+export interface ImportCandidate {
+  id: string;
+  sheet: string;
+  cell: string;
+  label: string;
+  text: string;
+  number: string | null;
+  percent: string | null;
+}
+
+export type UnitMixAttribute = "name" | "units" | "bedsPerUnit" | "avgSqFt" | "rent";
+
+export interface ImportUnitMix {
+  sheet: string;
+  header_row: number;
+  columns: { index: number; letter: string; header: string }[];
+  rows: { row: number; cells: { text: string; number: string | null }[] }[];
+  mapping: Record<UnitMixAttribute, number | null>;
+}
+
+export interface ImportProposal {
+  filename: string;
+  sheets: string[];
+  fields: ImportField[];
+  candidates: ImportCandidate[];
+  unit_mix: ImportUnitMix | null;
+  warnings: string[];
+}

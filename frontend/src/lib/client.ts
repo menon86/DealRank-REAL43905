@@ -25,6 +25,7 @@ import type {
   GeographyOut,
   HurdleOut,
   HurdleTableOut,
+  ImportProposal,
   MetricsOut,
   MonteCarloRequest,
   MonteCarloResponse,
@@ -419,6 +420,42 @@ export function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * POST /deals/import: reads a workbook (the template or the user's own)
+ * and returns what was found for the review screen. Saves nothing.
+ */
+export async function importSpreadsheet(file: File): Promise<ImportProposal> {
+  const body = new FormData();
+  body.append("file", file);
+  // No Content-Type header: the browser sets the multipart boundary.
+  const res = await fetch(`${API_BASE_URL}/deals/import`, { method: "POST", body });
+  if (!res.ok) {
+    throw new ApiError("POST", "/deals/import", res.status, await res.text());
+  }
+  return (await res.json()) as ImportProposal;
+}
+
+/** GET /deals/import/template, saved through the browser's download flow. */
+export async function downloadImportTemplate(): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/deals/import/template`);
+  if (!res.ok) {
+    throw new ApiError("GET", "/deals/import/template", res.status, await res.text());
+  }
+  saveBlob(await res.blob(), "dealrank_underwriting_template.xlsx");
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoke on the next tick so the browser has started the download.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 const REPORT_FILENAMES: Record<"pdf" | "pptx", string> = {
   pdf: "dealrank-comparison.pdf",
   pptx: "dealrank-comparison.pptx",
@@ -446,15 +483,7 @@ export async function downloadReport(
   if (blob.size === 0) {
     throw new Error(`The ${kind.toUpperCase()} report came back empty.`);
   }
-  const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = REPORT_FILENAMES[kind];
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoke on the next tick so the browser has started the download.
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  saveBlob(blob, REPORT_FILENAMES[kind]);
 }
 
 /**

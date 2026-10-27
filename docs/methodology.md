@@ -320,18 +320,14 @@ supplied the equity; the math always uses the residual common equity above.
 
 ---
 
-### 4. Excel Import / Upload Integration
+### 4. Spreadsheet Import
 
-> **Status:** a client-side CSV/TSV importer only. `.xlsx` is not supported, and there is no
-> server-side validation engine; the API's normal 422 validation applies when the deal is saved.
-
-To eliminate repetitive manual data entry, analysts can ingest property underwriting details and debt terms directly from standard Excel workbooks (`.xlsx`, `.xls`) or CSV files:
-
-- **Property Details & Unit Mix Workbook**: Automatically maps columns for property identification, sub-asset class selection, 5-tier unit mix matrix, operating expenses, and turnover assumptions.
-- **Financing Workbook**: Automatically ingests debt structure, LTV, loan amount, interest rate, I/O period, amortization duration, and loan fees.
-- **Validation Engine**: Performs schema validation, verifies leasing-mode consistency, checks for positive unit counts and non-negative rents, and returns cell-level validation errors before database persistence.
-
-
+Deal inputs can be imported from the downloadable Excel template or from the analyst's own
+workbook (`.xlsx` or `.csv`). The backend (`POST /deals/import`) finds values by their labels and
+a unit mix table by its column headers, and returns each value with the cell it came from. The
+analyst confirms or corrects every value, and can point a field at a different cell or remap the
+unit mix columns, before the form is filled. Import never saves a deal; the API's normal 422
+validation applies on save. Details: `docs/templates/underwriting-and-financing-import-spec.md`.
 
 ---
 

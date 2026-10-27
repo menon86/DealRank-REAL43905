@@ -1375,6 +1375,188 @@ button.primary:disabled {
   color: #991b1b;
 }
 
+.import-toolbar-title {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.import-toolbar-hint {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--color-text-muted, #5a677a);
+}
+
+.import-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* ---- Spreadsheet import review ------------------------------------------ */
+
+.import-review {
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--brass);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.import-review-header h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.import-review-header p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.import-review-section {
+  margin-top: 16px;
+}
+
+.import-review-section h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-primary);
+}
+
+.import-review-scroll {
+  overflow-x: auto;
+}
+
+.import-review-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.import-review-table th,
+.import-review-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.import-review-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.import-review-table tbody th {
+  font-weight: 500;
+  min-width: 170px;
+}
+
+.import-review-table tr.is-empty th {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.import-review-table input,
+.import-review-table select {
+  width: 100%;
+  min-width: 120px;
+  font-size: 13px;
+}
+
+.import-review-table select.import-review-source {
+  min-width: 220px;
+  max-width: 340px;
+}
+
+.import-review-table.compact td {
+  white-space: nowrap;
+}
+
+.import-review-unit {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.import-review-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--brass);
+}
+
+.import-review-flag {
+  width: 72px;
+}
+
+.import-review-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.import-review-badge.ok {
+  background: var(--color-accent-bg);
+  color: var(--color-primary);
+}
+
+.import-review-badge.check {
+  background: var(--brass-bg);
+  color: #7a5617;
+}
+
+.import-review-more {
+  margin-top: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.import-review-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.import-review-mapping {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.import-review-mapping label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.import-review-empty {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.import-review-actions {
+  margin-top: 16px;
+}
+
 /* ---- Asset-Class Specific Custom Inputs Card ---------------------------- */
 
 .housing-custom-card {

@@ -10,11 +10,18 @@ import {
   withDefaultTreasury,
 } from "../lib/capitalStack";
 import type { LayerForm } from "../lib/capitalStack";
-import { describeError, getHurdles } from "../lib/client";
+import {
+  describeError,
+  downloadImportTemplate,
+  getHurdles,
+  importSpreadsheet,
+} from "../lib/client";
 import { fractionToPercentInput, percentInputToFraction } from "../lib/format";
 import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
-import type { DealCreate, DealOut, LeasingMode, SubAssetClass } from "../lib/types";
+import type { DealCreate, DealOut, ImportProposal, LeasingMode, SubAssetClass } from "../lib/types";
 import { CapitalStackEditor } from "./CapitalStackEditor";
+import { ImportReview } from "./ImportReview";
+import type { ConfirmedImport } from "./ImportReview";
 import { NumberInput } from "./NumberInput";
 
 interface UnitMixTier {
@@ -175,8 +182,29 @@ function dealToFormState(deal: DealOut): FormState {
   };
 }
 
+/** Spreadsheet import keys that describe the capital stack, not the form. */
+const FINANCING_KEYS = new Set([
+  "senior_loan_type",
+  "loan_amount",
+  "rate_type",
+  "interest_rate_pct",
+  "index_name",
+  "index_rate_pct",
+  "spread_bps",
+  "io_months",
+  "amortization_years",
+  "term_years",
+  "recourse",
+  "origination_fee_pct",
+  "rate_cap_cost",
+  "mezzanine_loan_amount",
+  "mezzanine_interest_rate_pct",
+  "preferred_equity_amount",
+  "preferred_return_pct",
+]);
+
 /**
- * Builds the capital stack from the financing CSV template: the senior
+ * Builds the capital stack from imported financing values: the senior
  * loan, plus mezzanine and preferred equity layers when their amounts are
  * above zero. Equity layers already on the form are kept (a sponsor layer
  * is added if there are none). Also reads the older template's
@@ -442,8 +470,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
     setStackErrors([]);
   }
 
-  const underwritingFileInputRef = useRef<HTMLInputElement | null>(null);
-  const financingFileInputRef = useRef<HTMLInputElement | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [proposal, setProposal] = useState<ImportProposal | null>(null);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -558,189 +587,80 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   // "% of total cost" amounts are a share of price + closing costs.
   const totalCost = purchasePriceVal + closingCostsVal;
 
-  // --- Excel / CSV Template Downloads ---
-  function downloadCsv(filename: string, content: string) {
-    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // --- Spreadsheet import ---
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    setImportNotice(null);
+    try {
+      setProposal(await importSpreadsheet(file));
+    } catch (err) {
+      setImportNotice({
+        message: `Couldn't read "${file.name}". ${describeError(err)}`,
+        type: "error",
+      });
+    } finally {
+      setImporting(false);
+    }
   }
 
-  function handleDownloadUnderwritingTemplate() {
-    const csvContent = [
-      "Property_Details,Value",
-      "deal_name,Westwood Ridge Multifamily",
-      "sub_asset_class,suburban_garden",
-      "leasing_mode,per_unit",
-      "purchase_price,24500000",
-      "closing_costs,490000",
-      "vacancy_rate_pct,5.0",
-      "opex_annual,720000",
-      "expense_growth_rate_pct,3.0",
-      "rent_growth_rate_pct,3.0",
-      "lease_expiration_month,6",
-      "turnover_cost,800",
-      "turnover_rate_pct,55.0",
-      "hold_period_years,10",
-      "exit_cap_rate_pct,5.75",
-      "selling_costs_rate_pct,2.0",
-      "",
-      "Unit_Mix,Units,BedsPerUnit,AvgSqFt,MonthlyRent",
-      "Studio,20,1,540,1200",
-      "1bed,60,1,720,1450",
-      "2bed,80,2,980,1800",
-      "3bed,20,3,1240,2200",
-      "4bed_plus,0,4,1500,0",
-      "",
-      "Ancillary_Inputs,Value",
-      "surface_parking_stalls,180",
-      "covered_parking_stalls,40",
-      "parking_monthly_rate,50",
-      "storage_units,30",
-      "storage_monthly_fee,60",
-      "pet_monthly_fee,35",
-      "pet_penetration_pct,30",
-    ].join("\n");
-    downloadCsv("dealrank_underwriting_template.csv", csvContent);
+  async function handleDownloadTemplate() {
+    try {
+      await downloadImportTemplate();
+    } catch (err) {
+      setImportNotice({
+        message: `Couldn't download the template. ${describeError(err)}`,
+        type: "error",
+      });
+    }
   }
 
-  function handleDownloadFinancingTemplate() {
-    const csvContent = [
-      "Financing_Parameter,Value",
-      "senior_loan_type,agency_fannie_mae",
-      "loan_amount,15925000",
-      "rate_type,fixed",
-      "interest_rate_pct,6.25",
-      "index_name,SOFR",
-      "index_rate_pct,",
-      "spread_bps,",
-      "io_months,24",
-      "amortization_years,30",
-      "term_years,10",
-      "recourse,non_recourse",
-      "origination_fee_pct,1",
-      "rate_cap_cost,0",
-      "mezzanine_loan_amount,0",
-      "mezzanine_interest_rate_pct,0",
-      "preferred_equity_amount,0",
-      "preferred_return_pct,0",
-    ].join("\n");
-    downloadCsv("dealrank_financing_template.csv", csvContent);
-  }
-
-  // --- Excel / CSV Parsers ---
-  function parseCsvText(text: string) {
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-    const data: Record<string, string> = {};
-    const mixRows: UnitMixTier[] = [];
-
-    let inUnitMix = false;
-    for (const line of lines) {
-      const parts = line.split(",").map((p) => p.trim().replace(/^"|"$/g, ""));
-      if (parts[0] === "Unit_Mix") {
-        inUnitMix = true;
-        continue;
-      }
-      if (inUnitMix) {
-        if (parts[0] === "Ancillary_Inputs" || parts[0] === "" || parts.length < 5) {
-          inUnitMix = false;
-        } else {
-          const typeLower = parts[0].toLowerCase();
-          const matchedId = DEFAULT_UNIT_MIX.find((t) => t.id === typeLower || t.name.toLowerCase().includes(typeLower))?.id ?? typeLower;
-          mixRows.push({
-            id: matchedId,
-            name: parts[0],
-            units: parts[1] || "0",
-            bedsPerUnit: parts[2] || "1",
-            avgSqFt: parts[3] || "0",
-            rent: parts[4] || "0",
-          });
-          continue;
+  /** Fills the form from the values the user confirmed on the review screen. */
+  function applyImport({ values, unitMix: importedMix }: ConfirmedImport) {
+    const next: FormState = { ...form };
+    const formKeys = new Set(Object.keys(DEFAULTS));
+    for (const [key, value] of Object.entries(values)) {
+      if (formKeys.has(key)) (next as unknown as Record<string, string>)[key] = value;
+    }
+    if (importedMix) {
+      // Units and average rent come from the mix unless the file gave them.
+      const units = importedMix.reduce((acc, r) => acc + (Number(r.units) || 0), 0);
+      const beds = importedMix.reduce(
+        (acc, r) => acc + (Number(r.units) || 0) * (Number(r.bedsPerUnit) || 1),
+        0,
+      );
+      const gpr = importedMix.reduce(
+        (acc, r) => acc + (Number(r.units) || 0) * (Number(r.rent) || 0),
+        0,
+      );
+      if (next.leasing_mode === "per_unit") {
+        if (!values.unit_count) next.unit_count = units.toString();
+        if (!values.monthly_rent_per_unit && units > 0) {
+          next.monthly_rent_per_unit = (gpr / units).toFixed(2);
+        }
+      } else {
+        if (!values.bed_count) next.bed_count = beds.toString();
+        if (!values.monthly_rent_per_bed && beds > 0) {
+          next.monthly_rent_per_bed = (gpr / beds).toFixed(2);
         }
       }
+      setUnitMix(importedMix);
+    }
+    setForm(next);
+    setFieldErrors({});
 
-      if (parts.length >= 2) {
-        data[parts[0].toLowerCase()] = parts[1];
-      }
+    const financing = Object.fromEntries(
+      Object.entries(values).filter(([key]) => FINANCING_KEYS.has(key)),
+    );
+    if (Object.keys(financing).length > 0) {
+      updateLayers(withDefaultTreasury(layersFromFinancingCsv(financing, layers), treasuryPct));
     }
 
-    return { data, mixRows };
-  }
-
-  function handleUnderwritingFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const { data, mixRows } = parseCsvText(text);
-        if (Object.keys(data).length === 0 && mixRows.length === 0) {
-          throw new Error("no recognizable rows");
-        }
-
-        if (data.deal_name || data.name) set("name", data.deal_name || data.name);
-        if (data.sub_asset_class && ["student_housing", "suburban_garden", "urban_midrise"].includes(data.sub_asset_class)) {
-          set("sub_asset_class", data.sub_asset_class as SubAssetClass);
-        }
-        if (data.purchase_price) set("purchase_price", data.purchase_price);
-        if (data.closing_costs) set("closing_costs", data.closing_costs);
-        if (data.vacancy_rate_pct) set("vacancy_rate_pct", data.vacancy_rate_pct);
-        if (data.opex_annual) set("opex_annual", data.opex_annual);
-        if (data.expense_growth_rate_pct) set("expense_growth_rate_pct", data.expense_growth_rate_pct);
-        if (data.rent_growth_rate_pct) set("rent_growth_rate_pct", data.rent_growth_rate_pct);
-        if (data.lease_expiration_month) set("lease_expiration_month", data.lease_expiration_month);
-        if (data.turnover_cost) set("turnover_cost_per_unit_or_bed", data.turnover_cost);
-        if (data.turnover_rate_pct) set("annual_turnover_rate_pct", data.turnover_rate_pct);
-        if (data.exit_cap_rate_pct) set("exit_cap_rate_pct", data.exit_cap_rate_pct);
-        if (data.selling_costs_rate_pct) set("selling_costs_rate_pct", data.selling_costs_rate_pct);
-
-        if (mixRows.length > 0) {
-          setUnitMix(mixRows);
-          const unitsSum = mixRows.reduce((acc, r) => acc + (Number(r.units) || 0), 0);
-          const gprSum = mixRows.reduce((acc, r) => acc + (Number(r.units) || 0) * (Number(r.rent) || 0), 0);
-          const avgRent = unitsSum > 0 ? Number((gprSum / unitsSum).toFixed(2)) : 0;
-          set("unit_count", unitsSum.toString());
-          set("monthly_rent_per_unit", avgRent.toString());
-        }
-
-        setImportNotice({
-          message: `Successfully imported property & underwriting details from "${file.name}"!`,
-          type: "success",
-        });
-      } catch {
-        setImportNotice({
-          message: `Failed to parse "${file.name}". Please ensure it matches the template format.`,
-          type: "error",
-        });
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  function handleFinancingFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const { data } = parseCsvText(text);
-        if (Object.keys(data).length === 0) throw new Error("no recognizable rows");
-        updateLayers(withDefaultTreasury(layersFromFinancingCsv(data, layers), treasuryPct));
-
-        setImportNotice({
-          message: `Successfully imported financing details from "${file.name}"!`,
-          type: "success",
-        });
-      } catch {
-        setImportNotice({
-          message: `Failed to parse financing file "${file.name}".`,
-          type: "error",
-        });
-      }
-    };
-    reader.readAsText(file);
+    const count = Object.keys(values).length;
+    setProposal(null);
+    setImportNotice({
+      message: `Filled ${count} field${count === 1 ? "" : "s"}${importedMix ? ` and ${importedMix.length} unit mix rows` : ""} from the spreadsheet. Review the form, then save.`,
+      type: "success",
+    });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -827,63 +747,47 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
     <form className="card" onSubmit={handleSubmit}>
       <h2>{initial ? "Edit deal" : "New deal"}</h2>
 
-      {/* Excel & CSV Ingestion Toolbar */}
       <div className="import-toolbar">
         <div className="import-toolbar-title">
-          <span>📊</span>
-          <span>Excel / CSV Ingestion</span>
+          <span>Import from a spreadsheet</span>
+          <span className="import-toolbar-hint">
+            Use the template or your own Excel model. You review every value before it&apos;s filled in.
+          </span>
         </div>
         <div className="import-actions">
           <input
             type="file"
-            ref={underwritingFileInputRef}
+            ref={importFileInputRef}
             style={{ display: "none" }}
-            accept=".csv,.tsv"
+            accept=".xlsx,.xlsm,.csv,.tsv"
             onChange={(e) => {
-              if (e.target.files?.[0]) handleUnderwritingFile(e.target.files[0]);
+              const file = e.target.files?.[0];
+              // Reset so picking the same file again still fires onChange.
+              e.target.value = "";
+              if (file) void handleImportFile(file);
             }}
           />
           <button
             type="button"
             className="import-btn"
-            onClick={() => underwritingFileInputRef.current?.click()}
+            disabled={importing}
+            onClick={() => importFileInputRef.current?.click()}
           >
-            📥 Import Underwriting
+            {importing ? "Reading…" : "Import spreadsheet"}
           </button>
-
-          <input
-            type="file"
-            ref={financingFileInputRef}
-            style={{ display: "none" }}
-            accept=".csv,.tsv"
-            onChange={(e) => {
-              if (e.target.files?.[0]) handleFinancingFile(e.target.files[0]);
-            }}
-          />
-          <button
-            type="button"
-            className="import-btn"
-            onClick={() => financingFileInputRef.current?.click()}
-          >
-            📥 Import Financing
-          </button>
-
-          <button
-            type="button"
-            className="import-btn"
-            onClick={handleDownloadUnderwritingTemplate}
-          >
-            📄 Template (Underwriting)
-          </button>
-          <button
-            type="button"
-            className="import-btn"
-            onClick={handleDownloadFinancingTemplate}
-          >
-            📄 Template (Financing)
+          <button type="button" className="import-btn" onClick={handleDownloadTemplate}>
+            Download template
           </button>
         </div>
       </div>
+
+      {proposal && (
+        <ImportReview
+          proposal={proposal}
+          onApply={applyImport}
+          onCancel={() => setProposal(null)}
+        />
+      )}
 
       {importNotice && (
         <div className={`import-alert ${importNotice.type}`}>

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.chat import router as chat_router
 from app.api.deals import router as deals_router
+from app.api.imports import router as imports_router
 from app.api.market_check import router as market_check_router
 from app.api.rank import router as rank_router
 from app.api.reports import router as reports_router
@@ -30,6 +31,8 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Before deals_router, whose /deals/{deal_id} would otherwise claim /deals/import.
+app.include_router(imports_router)
 app.include_router(deals_router)
 app.include_router(rank_router)
 app.include_router(reports_router)
