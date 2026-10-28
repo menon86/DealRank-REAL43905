@@ -74,6 +74,10 @@ def test_monte_carlo_with_user_hurdle(client):
     body = resp.json()
     assert body["hurdle_source"] == "user" and D(body["hurdle"]) == D("0.08")
     assert body["simulations"] == 200 and body["converged"] == 200
+    assert body["levered_converged"] <= body["simulations"]
+    assert body["hurdle_basis"] == "after_costs"
+    gross = body["unlevered_irr_before_costs"]
+    assert D(gross["p50"]) > D(body["unlevered_irr"]["p50"])  # no closing/selling costs
     assert sum(b["count"] for b in body["unlevered_histogram"]) == 200
     assert D(body["unlevered_irr"]["p5"]) < D(body["unlevered_irr"]["p95"])
     assert 0 <= D(body["prob_below_hurdle"]) <= 1
