@@ -13,6 +13,7 @@ import type {
   PrepaymentType,
   RateType,
 } from "./types";
+import { fractionToPercentInput } from "./format";
 
 export interface LayerOption {
   type: LayerType;
@@ -356,8 +357,7 @@ export function blankLayer(type: LayerType): LayerForm {
 }
 
 function pct(value: number | null): string {
-  if (value === null) return "";
-  return String(Number((value * 100).toFixed(6)));
+  return value === null ? "" : fractionToPercentInput(value);
 }
 
 export function layerToForm(layer: CapitalStackLayer): LayerForm {
@@ -521,8 +521,15 @@ export function validateLayers(layers: LayerForm[], totalCost: number): string[]
 
     if (amount <= 0) errors.push(`${name}: enter an amount above zero.`);
     if (layer.rate_type === "floating") {
-      if (num(layer.index_rate_pct) === null || num(layer.spread_bps) === null) {
+      const indexRate = num(layer.index_rate_pct);
+      const spread = num(layer.spread_bps);
+      if (indexRate === null || spread === null) {
         errors.push(`${name}: floating-rate layers need an index rate and a spread.`);
+      } else {
+        if (indexRate < 0 || indexRate > 100) {
+          errors.push(`${name}: the index rate must be between 0 and 100%.`);
+        }
+        if (spread < 0) errors.push(`${name}: the spread can't be negative.`);
       }
     } else {
       const rate = num(layer.interest_rate_pct);
@@ -533,6 +540,8 @@ export function validateLayers(layers: LayerForm[], totalCost: number): string[]
     const amort = num(layer.amortization_years);
     if (io < 0 || !Number.isInteger(io))
       errors.push(`${name}: interest-only months must be a whole number.`);
+    else if (io > MAX_IO_MONTHS)
+      errors.push(`${name}: interest-only months can't exceed ${MAX_IO_MONTHS}.`);
     if (term !== null && (term <= 0 || term > 50 || !Number.isInteger(term))) {
       errors.push(`${name}: term must be 1–50 whole years.`);
     }
@@ -577,19 +586,34 @@ export function validateLayers(layers: LayerForm[], totalCost: number): string[]
     }
   });
 
-  // Debt and preferred equity can't cover (nearly) the whole cost: the
-  // backend requires common equity of at least 5% of total cost.
-  if (totalCost > 0) {
-    const financed = layers
-      .filter((l) => isDebtType(l.type) || l.type === "preferred_equity")
-      .reduce((sum, l) => sum + Math.max(0, layerAmount(l, totalCost)), 0);
-    if (financed > totalCost * 0.95) {
-      errors.push(
-        "Debt and preferred equity must leave at least 5% of total cost as common equity.",
-      );
-    }
+  if (totalCost > 0 && !commonEquityOk(layers, totalCost)) {
+    errors.push(
+      "Debt and preferred equity must leave at least 5% of total cost (price, closing costs " +
+        "and upfront financing costs) as common equity.",
+    );
   }
   return errors;
+}
+
+/** Longest interest-only period the backend accepts, in months. */
+export const MAX_IO_MONTHS = 600;
+/** Mirrors backend MIN_COMMON_EQUITY_SHARE (engine/financing.py). */
+export const MIN_COMMON_EQUITY_SHARE = 0.05;
+
+/**
+ * Mirrors backend common_equity_errors: total cost is price + closing costs
+ * (`priceAndClosing`, the same base "% of total cost" amounts use) plus every
+ * layer's upfront financing cost (origination fee, rate cap, upfront MIP);
+ * common equity = total cost − all debt − preferred equity, and must be at
+ * least 5% of total cost.
+ */
+export function commonEquityOk(layers: LayerForm[], priceAndClosing: number): boolean {
+  const upfront = layers.reduce((sum, l) => sum + upfrontCost(l, priceAndClosing), 0);
+  const total = priceAndClosing + upfront;
+  const financed = layers
+    .filter((l) => isDebtType(l.type) || l.type === "preferred_equity")
+    .reduce((sum, l) => sum + layerAmount(l, priceAndClosing), 0);
+  return total - financed >= total * MIN_COMMON_EQUITY_SHARE;
 }
 
 // ---------------------------------------------------------------------------

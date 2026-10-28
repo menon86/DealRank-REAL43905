@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blankLayer,
+  commonEquityOk,
   formToLayer,
   upfrontCost,
   validateLayers,
@@ -49,6 +50,38 @@ describe("validateLayers", () => {
       TOTAL_COST,
     );
     expect(errors.join(" ")).toMatch(/5% of total cost/);
+  });
+
+  it("counts upfront financing costs in total cost for the 5% equity check", () => {
+    // $9.5M of debt on $10M is exactly 5% equity without fees...
+    const loan = senior("9500000", { origination_fee_pct: "0" });
+    expect(commonEquityOk([loan, layer("sponsor_gp", "1")], TOTAL_COST)).toBe(true);
+    // ...and a 1% origination fee raises total cost to $10.095M, so equity
+    // ($595k) clears 5% of it ($504,750).
+    const withFee = { ...loan, origination_fee_pct: "1" };
+    expect(commonEquityOk([withFee, layer("sponsor_gp", "1")], TOTAL_COST)).toBe(true);
+    // $9.6M of debt leaves $400k, under 5% of $10M.
+    const tooMuch = senior("9600000", { origination_fee_pct: "0" });
+    expect(commonEquityOk([tooMuch, layer("sponsor_gp", "1")], TOTAL_COST)).toBe(false);
+  });
+
+  it("rejects a negative spread or index rate and over-long interest-only periods", () => {
+    const floating = senior("6500000", {
+      rate_type: "floating",
+      index_rate_pct: "4",
+      spread_bps: "-10",
+    });
+    expect(validateLayers([floating, layer("sponsor_gp", "1")], TOTAL_COST).join(" ")).toMatch(
+      /spread can't be negative/,
+    );
+    const negativeIndex = { ...floating, index_rate_pct: "-1", spread_bps: "250" };
+    expect(validateLayers([negativeIndex, layer("sponsor_gp", "1")], TOTAL_COST).join(" ")).toMatch(
+      /index rate must be between/,
+    );
+    const longIo = senior("6500000", { io_months: "601", term_years: "", amortization_years: "" });
+    expect(validateLayers([longIo, layer("sponsor_gp", "1")], TOTAL_COST).join(" ")).toMatch(
+      /can't exceed 600/,
+    );
   });
 
   it("rejects negative amounts", () => {

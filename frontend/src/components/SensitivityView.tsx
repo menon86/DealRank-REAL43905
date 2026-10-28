@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as client from "../lib/client";
-import { formatMoney, formatMultiple, formatPercent } from "../lib/format";
+import {
+  bpsInputToFraction,
+  formatMoney,
+  formatMultiple,
+  formatPercent,
+  percentInputToFraction,
+} from "../lib/format";
 import type {
   DealOut,
   MonteCarloResponse,
@@ -170,6 +176,11 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
     dscr: "1.25",
   });
   const [mcResult, setMcResult] = useState<MonteCarloResponse | null>(null);
+  /** The DSCR minimum the shown result was run with (not the live input). */
+  const [mcDscrUsed, setMcDscrUsed] = useState<number | null>(null);
+  // Bumped per run and on every deal change, so a response for a previous
+  // deal (or an earlier run) is ignored.
+  const mcRequestIdRef = useRef(0);
   const [mcLoading, setMcLoading] = useState(false);
   const [mcError, setMcError] = useState<string | null>(null);
 
@@ -183,7 +194,10 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
     setSweepLoading(true);
     setSweepError(null);
     setSweeps({});
+    mcRequestIdRef.current += 1;
     setMcResult(null);
+    setMcLoading(false);
+    setMcError(null);
     Promise.all(VARIABLES.map((v) => client.sweep(dealId, v.id)))
       .then(([cap, growth]) => {
         if (!cancelled) setSweeps({ exit_cap_rate: cap, rent_growth_rate: growth });
@@ -200,22 +214,26 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
   }, [dealId]);
 
   async function runMonteCarlo() {
+    const requestId = ++mcRequestIdRef.current;
+    const dscrMinimum = Number(mc.dscr);
     setMcLoading(true);
     setMcError(null);
     try {
-      setMcResult(
-        await client.monteCarlo(dealId, {
-          simulations: Math.round(Number(mc.simulations)),
-          seed: mc.seed.trim() === "" ? null : Math.round(Number(mc.seed)),
-          exit_cap_sd: Number(mc.exit_cap_bps) / 10000,
-          rent_growth_sd: Number(mc.rent_growth_pct) / 100,
-          vacancy_sd: Number(mc.vacancy_pct) / 100,
-          dscr_minimum: Number(mc.dscr),
-        }),
-      );
+      const result = await client.monteCarlo(dealId, {
+        simulations: Math.round(Number(mc.simulations)),
+        seed: mc.seed.trim() === "" ? null : Math.round(Number(mc.seed)),
+        exit_cap_sd: bpsInputToFraction(mc.exit_cap_bps),
+        rent_growth_sd: percentInputToFraction(mc.rent_growth_pct),
+        vacancy_sd: percentInputToFraction(mc.vacancy_pct),
+        dscr_minimum: dscrMinimum,
+      });
+      if (requestId !== mcRequestIdRef.current) return;
+      setMcResult(result);
+      setMcDscrUsed(dscrMinimum);
+      setMcLoading(false);
     } catch (err) {
+      if (requestId !== mcRequestIdRef.current) return;
       setMcError(client.describeError(err));
-    } finally {
       setMcLoading(false);
     }
   }
@@ -276,8 +294,10 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
           <div>
             <h2>Monte Carlo</h2>
             <p className="card-subtitle">
-              Draws exit cap rate, rent growth and vacancy together (independent normal draws around
-              the deal&apos;s inputs) and re-runs the full model each time.
+              Draws exit cap rate, rent growth and vacancy together (normal draws around the
+              deal&apos;s inputs) and re-runs the full model each time. Exit cap and rent growth are
+              drawn correlated (−0.3 by default, adjustable through the API), so weaker rent growth
+              tends to come with a higher exit cap; vacancy is drawn independently.
             </p>
           </div>
         </div>
@@ -338,12 +358,16 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
               <div>
                 <dt>
                   P(IRR &lt; {formatPercent(mcResult.hurdle)}{" "}
-                  {mcResult.hurdle_source === "risk_adjusted" ? "risk-adj. hurdle" : "hurdle"})
+                  {mcResult.hurdle_source === "risk_adjusted" ? "risk-adj. hurdle" : "hurdle"},{" "}
+                  {mcResult.hurdle_basis === "before_costs"
+                    ? "IRR before closing & selling costs"
+                    : "IRR after costs"}
+                  )
                 </dt>
                 <dd>{formatPercent(mcResult.prob_below_hurdle, 1)}</dd>
               </div>
               <div>
-                <dt>P(DSCR dips below {Number(mc.dscr).toFixed(2)}x)</dt>
+                <dt>P(DSCR dips below {formatMultiple(mcDscrUsed)})</dt>
                 <dd>
                   {mcResult.prob_dscr_below_minimum === null
                     ? "n/a (no debt)"
@@ -367,7 +391,13 @@ export function SensitivityView({ deals }: SensitivityViewProps) {
               </span>
             </div>
             <p className="provenance-line">
-              {mcResult.converged} of {mcResult.simulations} runs produced an IRR
+              {mcResult.converged} of {mcResult.simulations} runs produced an unlevered IRR
+              {mcResult.levered_converged < mcResult.simulations
+                ? `; only ${mcResult.levered_converged} produced a levered IRR (the failed runs are the worst outcomes, so the levered distribution is optimistic)`
+                : ""}
+              {mcResult.unlevered_irr_before_costs
+                ? ` · median IRR before costs ${formatPercent(mcResult.unlevered_irr_before_costs.p50)}`
+                : ""}
               {mcResult.seed !== null ? ` · seed ${mcResult.seed}` : ""}.
             </p>
           </div>

@@ -75,17 +75,19 @@ export function ChatPanel({ open, onClose, selectedDealIds, rankingSettings }: C
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  // Screen readers hear each reply once, when it has finished, rather than
+  // every streamed fragment: the live region below only changes here.
+  const [announcement, setAnnouncement] = useState("");
+  const announcedId = useRef(0);
+  useEffect(() => {
+    const last = [...messages].reverse().find((m) => m.role === "assistant");
+    if (!last || last.pending || !last.content || last.id === announcedId.current) return;
+    announcedId.current = last.id;
+    setAnnouncement(last.content);
   }, [messages]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -216,8 +218,20 @@ export function ChatPanel({ open, onClose, selectedDealIds, rankingSettings }: C
   const notConfigured = fallback === "not_configured";
   const showChips = presets.length > 0 && (messages.length === 0 || fallback !== null);
 
+  // Escape closes the panel only while focus is inside it (onKeyDown on the
+  // panel, not a window listener).
   return (
-    <aside className="chat-panel" role="complementary" aria-label="Deal assistant">
+    <aside
+      className="chat-panel"
+      role="complementary"
+      aria-label="Deal assistant"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
       <header className="chat-header">
         <div>
           <h2>Ask about your deals</h2>
@@ -233,7 +247,10 @@ export function ChatPanel({ open, onClose, selectedDealIds, rankingSettings }: C
         </button>
       </header>
 
-      <div className="chat-messages" ref={listRef} aria-live="polite">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
+      <div className="chat-messages" ref={listRef} aria-busy={busy}>
         {messages.length === 0 && (
           <p className="chat-hint">
             Ask why a deal ranks where it does, what a DSCR is, who failed the DSCR gate, or how a

@@ -17,6 +17,7 @@ import {
   importSpreadsheet,
 } from "../lib/client";
 import { fractionToPercentInput, percentInputToFraction } from "../lib/format";
+import { isPositiveInteger, unitMixTotals, wouldOverwrite } from "../lib/unitMix";
 import { SUB_ASSET_CLASS_LABELS } from "../lib/types";
 import type { DealCreate, DealOut, ImportProposal, LeasingMode, SubAssetClass } from "../lib/types";
 import { CapitalStackEditor } from "./CapitalStackEditor";
@@ -74,6 +75,8 @@ interface FormState {
 
   // Student Housing specific
   tech_package_monthly_fee: string;
+  /** Per-unit student deals only: beds per unit used to estimate per-bed package fees. */
+  student_beds_per_unit: string;
   furniture_package_monthly_fee: string;
 
   // Urban Mid-Rise specific
@@ -90,6 +93,14 @@ const DEFAULT_UNIT_MIX: UnitMixTier[] = [
   { id: "3bed", name: "3 Bed / 2 Bath", units: "15", bedsPerUnit: "3", avgSqFt: "1220", rent: "2250" },
   { id: "4bed_plus", name: "4+ Bed", units: "5", bedsPerUnit: "4", avgSqFt: "1450", rent: "2600" },
 ];
+
+/** The standard tiers with nothing filled in, for an existing deal saved without a mix. */
+const EMPTY_UNIT_MIX: UnitMixTier[] = DEFAULT_UNIT_MIX.map((tier) => ({
+  ...tier,
+  units: "0",
+  avgSqFt: "0",
+  rent: "0",
+}));
 
 const DEFAULTS: FormState = {
   name: "",
@@ -128,6 +139,7 @@ const DEFAULTS: FormState = {
   pet_penetration_pct: "35",
 
   tech_package_monthly_fee: "55",
+  student_beds_per_unit: "2",
   furniture_package_monthly_fee: "40",
 
   garage_parking_stalls: "110",
@@ -259,6 +271,7 @@ type FieldErrors = Partial<Record<keyof FormState, string>>;
 
 /** Ancillary-income inputs that can't be negative, and the ones that are percentages. */
 const ANCILLARY_AMOUNTS: (keyof FormState)[] = [
+  "student_beds_per_unit",
   "surface_parking_stalls",
   "covered_parking_stalls",
   "parking_monthly_rate",
@@ -275,7 +288,7 @@ const ANCILLARY_AMOUNTS: (keyof FormState)[] = [
 const ANCILLARY_PERCENTS: (keyof FormState)[] = ["parking_occupancy_pct", "pet_penetration_pct"];
 
 /** Negative or out-of-range entries in the unit mix and the ancillary-income helpers. */
-function validateExtras(form: FormState, unitMix: UnitMixTier[]): string[] {
+function validateExtras(form: FormState, unitMix: UnitMixTier[] | null): string[] {
   const problems: string[] = [];
   for (const key of ANCILLARY_AMOUNTS) {
     const value = parseNumber(form[key] as string);
@@ -289,7 +302,7 @@ function validateExtras(form: FormState, unitMix: UnitMixTier[]): string[] {
       problems.push(`${key.replace(/_/g, " ")} must be between 0 and 100.`);
     }
   }
-  for (const tier of unitMix) {
+  for (const tier of unitMix ?? []) {
     for (const [label, raw] of [
       ["units", tier.units],
       ["avg sq ft", tier.avgSqFt],
@@ -325,13 +338,15 @@ function validate(form: FormState): FieldErrors {
   else if (form.name.trim().length > 255) errors.name = "Keep the name under 256 characters.";
 
   if (isPerUnit) {
-    const units = parseNumber(form.unit_count);
-    if (units === null || units <= 0) errors.unit_count = "Enter a positive unit count.";
+    if (!isPositiveInteger(form.unit_count)) {
+      errors.unit_count = "Enter a positive whole number of units.";
+    }
     const rent = parseNumber(form.monthly_rent_per_unit);
     if (rent === null || rent <= 0) errors.monthly_rent_per_unit = "Enter a positive rent.";
   } else {
-    const beds = parseNumber(form.bed_count);
-    if (beds === null || beds <= 0) errors.bed_count = "Enter a positive bed count.";
+    if (!isPositiveInteger(form.bed_count)) {
+      errors.bed_count = "Enter a positive whole number of beds.";
+    }
     const rent = parseNumber(form.monthly_rent_per_bed);
     if (rent === null || rent <= 0) errors.monthly_rent_per_bed = "Enter a positive rent.";
   }
@@ -437,10 +452,21 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           avgSqFt: t.avg_sqft.toString(),
           rent: t.rent.toString(),
         }))
-      : DEFAULT_UNIT_MIX,
+      : initial
+        ? EMPTY_UNIT_MIX
+        : DEFAULT_UNIT_MIX,
   );
-  const [showUnitMix, setShowUnitMix] = useState<boolean>(true);
+  // The mix is only saved once the user has edited, imported or applied one
+  // (or the deal already had one); until then the table is a sample and
+  // unit_mix is sent as null rather than a mix the user never chose.
+  const [unitMixTouched, setUnitMixTouched] = useState<boolean>(Boolean(initial?.unit_mix));
+  // An existing deal with no stored mix starts with the table hidden, so it
+  // doesn't show a mix that disagrees with the deal's unit count.
+  const [showUnitMix, setShowUnitMix] = useState<boolean>(!initial || Boolean(initial.unit_mix));
   const [importNotice, setImportNotice] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  // Bumped on a failed submit; the effect below moves focus to the first problem.
+  const [focusRequest, setFocusRequest] = useState(0);
   const [layers, setLayers] = useState<LayerForm[]>(() => initialLayers(initial, defaultLayers));
   const [stackErrors, setStackErrors] = useState<string[]>([]);
   // The 10-Year Treasury (live, or the configured fallback) pre-fills the
@@ -485,83 +511,140 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   }
 
   function fieldError(key: keyof FormState) {
-    return fieldErrors[key] ? <span className="field-error-text">{fieldErrors[key]}</span> : null;
+    return fieldErrors[key] ? (
+      <span id={`${key}-error`} className="field-error-text">
+        {fieldErrors[key]}
+      </span>
+    ) : null;
   }
 
+  /** aria-invalid, plus aria-describedby pointing at the field's error text. */
+  function errorProps(key: keyof FormState) {
+    const invalid = Boolean(fieldErrors[key]);
+    return {
+      "aria-invalid": invalid,
+      "aria-describedby": invalid ? `${key}-error` : undefined,
+    };
+  }
+
+  useEffect(() => {
+    if (focusRequest === 0) return;
+    const target = formRef.current?.querySelector<HTMLElement>(
+      '[aria-invalid="true"], .form-error-summary',
+    );
+    target?.focus();
+  }, [focusRequest]);
+
   // --- Unit Mix Computations ---
-  const totalMixUnits = unitMix.reduce((acc, row) => acc + (Number(row.units) || 0), 0);
-  const totalMixBeds = unitMix.reduce(
-    (acc, row) => acc + (Number(row.units) || 0) * (Number(row.bedsPerUnit) || 1),
-    0
-  );
-  const totalMonthlyGpr = unitMix.reduce(
-    (acc, row) => acc + (Number(row.units) || 0) * (Number(row.rent) || 0),
-    0
-  );
-  const weightedAvgRentPerUnit = totalMixUnits > 0 ? totalMonthlyGpr / totalMixUnits : 0;
-  const totalMixSqFt = unitMix.reduce(
-    (acc, row) => acc + (Number(row.units) || 0) * (Number(row.avgSqFt) || 0),
-    0
-  );
-  const weightedAvgRentPerSqFt = totalMixSqFt > 0 ? totalMonthlyGpr / totalMixSqFt : 0;
+  const mixTotals = unitMixTotals(unitMix);
+  const totalMixUnits = mixTotals.units;
+  const totalMixBeds = mixTotals.beds;
+  const totalMonthlyGpr = mixTotals.monthlyGpr;
+  const weightedAvgRentPerUnit = mixTotals.avgRentPerUnit;
+  const weightedAvgRentPerSqFt = mixTotals.avgRentPerSqFt;
 
   function updateUnitMixRow(id: string, field: keyof UnitMixTier, val: string) {
+    setUnitMixTouched(true);
     setUnitMix((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: val } : row))
     );
   }
 
+  /** Asks before an Apply button replaces values the user already entered. */
+  function confirmOverwrite(changes: [label: string, current: string, next: string][]): boolean {
+    const replaced = changes.filter(([, current, next]) => wouldOverwrite(current, next));
+    if (replaced.length === 0) return true;
+    const lines = replaced.map(([label, current, next]) => `${label}: ${current} → ${next}`);
+    return window.confirm(`This will replace:\n${lines.join("\n")}\n\nContinue?`);
+  }
+
   function syncUnitMixToDeal() {
     if (form.leasing_mode === "per_unit") {
-      set("unit_count", totalMixUnits.toString());
-      set("monthly_rent_per_unit", weightedAvgRentPerUnit.toFixed(2));
+      const units = totalMixUnits.toString();
+      const rent = weightedAvgRentPerUnit.toFixed(2);
+      if (
+        !confirmOverwrite([
+          ["Unit count", form.unit_count, units],
+          ["Monthly rent / unit", form.monthly_rent_per_unit, rent],
+        ])
+      ) {
+        return;
+      }
+      set("unit_count", units);
+      set("monthly_rent_per_unit", rent);
     } else {
-      set("bed_count", totalMixBeds.toString());
-      const avgRentPerBed = totalMixBeds > 0 ? totalMonthlyGpr / totalMixBeds : 0;
-      set("monthly_rent_per_bed", avgRentPerBed.toFixed(2));
+      const beds = totalMixBeds.toString();
+      const rent = mixTotals.avgRentPerBed.toFixed(2);
+      if (
+        !confirmOverwrite([
+          ["Bed count", form.bed_count, beds],
+          ["Monthly rent / bed", form.monthly_rent_per_bed, rent],
+        ])
+      ) {
+        return;
+      }
+      set("bed_count", beds);
+      set("monthly_rent_per_bed", rent);
     }
+    setUnitMixTouched(true);
     setImportNotice({
-      message: `Synchronized unit mix: ${totalMixUnits} units (${totalMixBeds} beds) at $${Math.round(weightedAvgRentPerUnit)}/mo average into deal GPR.`,
+      message:
+        form.leasing_mode === "per_unit"
+          ? `Applied unit mix: ${totalMixUnits} units at $${Math.round(weightedAvgRentPerUnit).toLocaleString()}/unit/mo average.`
+          : `Applied unit mix: ${totalMixBeds} beds at $${mixTotals.avgRentPerBed.toFixed(2)}/bed/mo (total unit rent ÷ total beds).`,
       type: "success",
     });
   }
+
+  /** Fills other income from an ancillary estimate, after confirming an overwrite. */
+  function applyOtherIncome(total: number, message: string) {
+    const next = total.toString();
+    if (!confirmOverwrite([["Other income, annual", form.other_income_annual, next]])) return;
+    set("other_income_annual", next);
+    setImportNotice({ message, type: "success" });
+  }
+
+  const isPerUnit = form.leasing_mode === "per_unit";
 
   // --- Asset-Class Specific Calculations ---
   function calculateSuburbanGardenAncillary() {
     const surfaceStalls = Number(form.surface_parking_stalls) || 0;
     const coveredStalls = Number(form.covered_parking_stalls) || 0;
     const parkingRate = Number(form.parking_monthly_rate) || 0;
-    const parkingOcc = (Number(form.parking_occupancy_pct) || 0) / 100;
+    const parkingOcc = percentInputToFraction(form.parking_occupancy_pct);
     const annualParking = (surfaceStalls + coveredStalls) * parkingRate * parkingOcc * 12;
 
     const storageCount = Number(form.storage_units) || 0;
     const storageFee = Number(form.storage_monthly_fee) || 0;
     const annualStorage = storageCount * storageFee * 12;
 
-    const units = Number(form.unit_count) || 0;
+    // Pet rent applies per leasable unit: units in a per-unit deal, beds in a per-bed one.
+    const petBasis = Number(isPerUnit ? form.unit_count : form.bed_count) || 0;
     const petFee = Number(form.pet_monthly_fee) || 0;
-    const petPenetration = (Number(form.pet_penetration_pct) || 0) / 100;
-    const annualPets = units * petPenetration * petFee * 12;
+    const petPenetration = percentInputToFraction(form.pet_penetration_pct);
+    const annualPets = petBasis * petPenetration * petFee * 12;
 
     const totalAncillary = Math.round(annualParking + annualStorage + annualPets);
-    set("other_income_annual", totalAncillary.toString());
-    setImportNotice({
-      message: `Calculated Suburban Garden ancillary income: $${totalAncillary.toLocaleString()}/yr (Parking: $${Math.round(annualParking).toLocaleString()}, Storage: $${Math.round(annualStorage).toLocaleString()}, Pets: $${Math.round(annualPets).toLocaleString()}).`,
-      type: "success",
-    });
+    applyOtherIncome(
+      totalAncillary,
+      `Calculated Suburban Garden ancillary income: $${totalAncillary.toLocaleString()}/yr (Parking: $${Math.round(annualParking).toLocaleString()}, Storage: $${Math.round(annualStorage).toLocaleString()}, Pets: $${Math.round(annualPets).toLocaleString()} across ${petBasis.toLocaleString()} ${isPerUnit ? "units" : "beds"}).`,
+    );
   }
 
   function calculateStudentHousingAncillary() {
-    const beds = Number(form.bed_count) || (Number(form.unit_count) || 0) * 2;
+    // Per-bed deals use the bed count; per-unit deals use units x the
+    // beds-per-unit input shown beside the fees (not a hidden assumption).
+    const units = Number(form.unit_count) || 0;
+    const bedsPerUnit = Number(form.student_beds_per_unit) || 0;
+    const beds = isPerUnit ? units * bedsPerUnit : Number(form.bed_count) || 0;
     const techFee = Number(form.tech_package_monthly_fee) || 0;
     const furnitureFee = Number(form.furniture_package_monthly_fee) || 0;
     const annualPackages = Math.round(beds * (techFee + furnitureFee) * 12);
 
-    set("other_income_annual", annualPackages.toString());
-    setImportNotice({
-      message: `Calculated Student Housing package fees: $${annualPackages.toLocaleString()}/yr across ${beds} beds.`,
-      type: "success",
-    });
+    applyOtherIncome(
+      annualPackages,
+      `Calculated Student Housing package fees: $${annualPackages.toLocaleString()}/yr across ${beds.toLocaleString()} beds${isPerUnit ? ` (${units.toLocaleString()} units × ${bedsPerUnit} beds/unit)` : ""}.`,
+    );
   }
 
   function calculateUrbanMidRiseAncillary() {
@@ -574,11 +657,10 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
     const annualRetail = retailSqFt * retailRent;
 
     const totalAncillary = Math.round(annualParking + annualRetail);
-    set("other_income_annual", totalAncillary.toString());
-    setImportNotice({
-      message: `Calculated Urban Mid-Rise ancillary income: $${totalAncillary.toLocaleString()}/yr (Garage: $${Math.round(annualParking).toLocaleString()}, Retail NNN: $${Math.round(annualRetail).toLocaleString()}).`,
-      type: "success",
-    });
+    applyOtherIncome(
+      totalAncillary,
+      `Calculated Urban Mid-Rise ancillary income: $${totalAncillary.toLocaleString()}/yr (Garage: $${Math.round(annualParking).toLocaleString()}, Retail NNN: $${Math.round(annualRetail).toLocaleString()}).`,
+    );
   }
 
   // --- Capital Stack ---
@@ -644,6 +726,8 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         }
       }
       setUnitMix(importedMix);
+      setUnitMixTouched(true);
+      setShowUnitMix(true);
     }
     setForm(next);
     setFieldErrors({});
@@ -675,9 +759,12 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       layerErrors.push("The senior loan can't exceed the purchase price.");
     }
     setStackErrors(layerErrors);
-    const extraErrors = validateExtras(form, unitMix);
+    const extraErrors = validateExtras(form, unitMixTouched ? unitMix : null);
     setSubmitError(extraErrors.length > 0 ? extraErrors.join(" ") : null);
-    if (Object.keys(errors).length > 0 || layerErrors.length > 0 || extraErrors.length > 0) return;
+    if (Object.keys(errors).length > 0 || layerErrors.length > 0 || extraErrors.length > 0) {
+      setFocusRequest((n) => n + 1);
+      return;
+    }
 
     // The backend overwrites loan_amount / interest_rate /
     // amortization_years from the senior layer; send the same values so
@@ -705,14 +792,16 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       credit_loss_rate: percentInputToFraction(form.credit_loss_rate_pct),
       management_fee_rate: percentInputToFraction(form.management_fee_rate_pct),
       replacement_reserve_per_unit_or_bed: Number(form.replacement_reserve_per_unit_or_bed) || 0,
-      unit_mix: unitMix.map((t) => ({
-        id: t.id,
-        name: t.name,
-        units: Math.round(Number(t.units) || 0),
-        beds_per_unit: Math.max(1, Math.round(Number(t.bedsPerUnit) || 1)),
-        avg_sqft: Math.round(Number(t.avgSqFt) || 0),
-        rent: Number(t.rent) || 0,
-      })),
+      unit_mix: unitMixTouched
+        ? unitMix.map((t) => ({
+            id: t.id,
+            name: t.name,
+            units: Math.round(Number(t.units) || 0),
+            beds_per_unit: Math.max(1, Math.round(Number(t.bedsPerUnit) || 1)),
+            avg_sqft: Math.round(Number(t.avgSqFt) || 0),
+            rent: Number(t.rent) || 0,
+          }))
+        : null,
       opex_annual: Number(form.opex_annual) || 0,
       expense_growth_rate: percentInputToFraction(form.expense_growth_rate_pct),
       rent_growth_rate: percentInputToFraction(form.rent_growth_rate_pct),
@@ -738,13 +827,12 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       // Keep the form open with the user's input and say what went wrong.
       setSubmitError(`Couldn't save the deal. ${describeError(err)}`);
       setSubmitting(false);
+      setFocusRequest((n) => n + 1);
     }
   }
 
-  const isPerUnit = form.leasing_mode === "per_unit";
-
   return (
-    <form className="card" onSubmit={handleSubmit}>
+    <form className="card" onSubmit={handleSubmit} ref={formRef}>
       <h2>{initial ? "Edit deal" : "New deal"}</h2>
 
       <div className="import-toolbar">
@@ -790,14 +878,18 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       )}
 
       {importNotice && (
-        <div className={`import-alert ${importNotice.type}`}>
+        <div
+          className={`import-alert ${importNotice.type}`}
+          role={importNotice.type === "error" ? "alert" : "status"}
+        >
           <span>{importNotice.message}</span>
           <button
             type="button"
-            style={{ background: "none", border: "none", cursor: "pointer", fontWeight: "bold" }}
+            className="dismiss-btn"
+            aria-label="Dismiss message"
             onClick={() => setImportNotice(null)}
           >
-            ✕
+            <span aria-hidden="true">✕</span>
           </button>
         </div>
       )}
@@ -813,7 +905,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             onChange={(e) => set("name", e.target.value)}
             maxLength={255}
             placeholder="e.g. Campus View Student Housing"
-            aria-invalid={!!fieldErrors.name}
+            {...errorProps("name")}
           />
           {fieldError("name")}
         </div>
@@ -846,33 +938,40 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         {form.sub_asset_class === "suburban_garden" && (
           <>
             <p className="housing-helper-note">
-              Suburban Garden properties capture ancillary revenue from parking spaces, garages, storage lockers, pet rent, and RUBS utility reimbursements.
+              Suburban Garden properties capture ancillary revenue from parking, storage lockers and
+              pet rent. Utility reimbursements (RUBS) aren&apos;t calculated here; add them to other
+              income yourself. These inputs are used to total other income and are not saved
+              separately.
             </p>
             <div className="field-grid">
               <div className="field">
-                <label>Surface Parking Stalls</label>
+                <label htmlFor="surface_parking_stalls">Surface Parking Stalls</label>
                 <NumberInput
+                  id="surface_parking_stalls"
                   value={form.surface_parking_stalls}
                   onChange={(v) => set("surface_parking_stalls", v)}
                 />
               </div>
               <div className="field">
-                <label>Covered/Garage Stalls</label>
+                <label htmlFor="covered_parking_stalls">Covered/Garage Stalls</label>
                 <NumberInput
+                  id="covered_parking_stalls"
                   value={form.covered_parking_stalls}
                   onChange={(v) => set("covered_parking_stalls", v)}
                 />
               </div>
               <div className="field">
-                <label>Monthly Parking Fee ($/stall)</label>
+                <label htmlFor="parking_monthly_rate">Monthly Parking Fee ($/stall)</label>
                 <NumberInput
+                  id="parking_monthly_rate"
                   value={form.parking_monthly_rate}
                   onChange={(v) => set("parking_monthly_rate", v)}
                 />
               </div>
               <div className="field">
-                <label>Parking Occupancy (%)</label>
+                <label htmlFor="parking_occupancy_pct">Parking Occupancy (%)</label>
                 <input
+                  id="parking_occupancy_pct"
                   type="number"
                   min="0"
                   value={form.parking_occupancy_pct}
@@ -880,29 +979,33 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 />
               </div>
               <div className="field">
-                <label>Storage Units</label>
+                <label htmlFor="storage_units">Storage Units</label>
                 <NumberInput
+                  id="storage_units"
                   value={form.storage_units}
                   onChange={(v) => set("storage_units", v)}
                 />
               </div>
               <div className="field">
-                <label>Storage Fee ($/mo)</label>
+                <label htmlFor="storage_monthly_fee">Storage Fee ($/mo)</label>
                 <NumberInput
+                  id="storage_monthly_fee"
                   value={form.storage_monthly_fee}
                   onChange={(v) => set("storage_monthly_fee", v)}
                 />
               </div>
               <div className="field">
-                <label>Monthly Pet Fee ($/unit)</label>
+                <label htmlFor="pet_monthly_fee">Monthly Pet Fee ($/{isPerUnit ? "unit" : "bed"})</label>
                 <NumberInput
+                  id="pet_monthly_fee"
                   value={form.pet_monthly_fee}
                   onChange={(v) => set("pet_monthly_fee", v)}
                 />
               </div>
               <div className="field">
-                <label>Pet Penetration Rate (%)</label>
+                <label htmlFor="pet_penetration_pct">Pet Penetration Rate (%)</label>
                 <input
+                  id="pet_penetration_pct"
                   type="number"
                   min="0"
                   value={form.pet_penetration_pct}
@@ -925,23 +1028,45 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         {form.sub_asset_class === "student_housing" && (
           <>
             <p className="housing-helper-note">
-              Student Housing underwrites on a per-bed basis with August turn concentration and mandatory fee packages (Wi-Fi/tech and furniture).
+              Student Housing usually leases per bed with mandatory fee packages (Wi-Fi/tech and
+              furniture). Lease-up timing such as an August turn isn&apos;t modeled: the lease
+              expiration month is recorded for display only. These inputs are used to total other
+              income and are not saved separately.
             </p>
             <div className="field-grid">
               <div className="field">
-                <label>Tech &amp; Wi-Fi Package ($/bed/mo)</label>
+                <label htmlFor="tech_package_monthly_fee">Tech &amp; Wi-Fi Package ($/bed/mo)</label>
                 <NumberInput
+                  id="tech_package_monthly_fee"
                   value={form.tech_package_monthly_fee}
                   onChange={(v) => set("tech_package_monthly_fee", v)}
                 />
               </div>
               <div className="field">
-                <label>Furniture Package ($/bed/mo)</label>
+                <label htmlFor="furniture_package_monthly_fee">Furniture Package ($/bed/mo)</label>
                 <NumberInput
+                  id="furniture_package_monthly_fee"
                   value={form.furniture_package_monthly_fee}
                   onChange={(v) => set("furniture_package_monthly_fee", v)}
                 />
               </div>
+              {isPerUnit ? (
+                <div className="field">
+                  <label htmlFor="student_beds_per_unit">Beds per unit (for package fees)</label>
+                  <input
+                    id="student_beds_per_unit"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={form.student_beds_per_unit}
+                    onChange={(e) => set("student_beds_per_unit", e.target.value)}
+                  />
+                </div>
+              ) : (
+                <p className="housing-helper-note">
+                  Package fees use the bed count entered under Leasing &amp; GPR.
+                </p>
+              )}
             </div>
             <div style={{ marginTop: "12px", textAlign: "right" }}>
               <button
@@ -958,33 +1083,39 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         {form.sub_asset_class === "urban_midrise" && (
           <>
             <p className="housing-helper-note">
-              Urban Mid-Rise properties feature structured subterranean parking garages, premium stall rents, and ground-floor commercial/retail spaces.
+              Urban Mid-Rise properties feature structured parking garages, premium stall rents, and
+              ground-floor commercial/retail space. These inputs are used to total other income and
+              are not saved separately.
             </p>
             <div className="field-grid">
               <div className="field">
-                <label>Structured Garage Stalls</label>
+                <label htmlFor="garage_parking_stalls">Structured Garage Stalls</label>
                 <NumberInput
+                  id="garage_parking_stalls"
                   value={form.garage_parking_stalls}
                   onChange={(v) => set("garage_parking_stalls", v)}
                 />
               </div>
               <div className="field">
-                <label>Monthly Garage Rate ($/stall)</label>
+                <label htmlFor="garage_monthly_rate">Monthly Garage Rate ($/stall)</label>
                 <NumberInput
+                  id="garage_monthly_rate"
                   value={form.garage_monthly_rate}
                   onChange={(v) => set("garage_monthly_rate", v)}
                 />
               </div>
               <div className="field">
-                <label>Ground-Floor Retail Sq Ft</label>
+                <label htmlFor="commercial_retail_sqft">Ground-Floor Retail Sq Ft</label>
                 <NumberInput
+                  id="commercial_retail_sqft"
                   value={form.commercial_retail_sqft}
                   onChange={(v) => set("commercial_retail_sqft", v)}
                 />
               </div>
               <div className="field">
-                <label>Retail Rent ($/sqft NNN annual)</label>
+                <label htmlFor="commercial_rent_sqft_annual">Retail Rent ($/sqft NNN annual)</label>
                 <NumberInput
+                  id="commercial_rent_sqft_annual"
                   value={form.commercial_rent_sqft_annual}
                   onChange={(v) => set("commercial_rent_sqft_annual", v)}
                 />
@@ -1009,69 +1140,89 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           <h4>🏢 Unit Mix Matrix (Studio, 1, 2, 3, 4+ Beds)</h4>
           <button
             type="button"
-            className="import-btn"
-            style={{ fontSize: "11px", padding: "4px 8px" }}
+            className="import-btn unit-mix-toggle"
+            aria-expanded={showUnitMix}
             onClick={() => setShowUnitMix(!showUnitMix)}
           >
             {showUnitMix ? "Hide Table" : "Show Table"}
           </button>
         </div>
+        {!unitMixTouched && (
+          <p className="housing-helper-note">
+            {initial
+              ? "No unit mix is saved for this deal. Enter one below if you want it kept; it's only saved once you edit or apply it."
+              : "Sample mix for reference. It's only saved with the deal once you edit a row or apply it."}
+          </p>
+        )}
+        {showUnitMix && (
+          <p className="housing-helper-note">
+            Rent is <strong>monthly rent per unit</strong> for every tier.
+            {!isPerUnit &&
+              " This deal leases per bed: Apply divides the mix's total monthly rent by its total beds to get rent per bed."}
+          </p>
+        )}
 
         {showUnitMix && (
           <>
-            <table className="unit-mix-table">
-              <thead>
-                <tr>
-                  <th>Unit Type</th>
-                  <th style={{ width: "90px" }}>Units</th>
-                  <th style={{ width: "90px" }}>Beds/Unit</th>
-                  <th style={{ width: "100px" }}>Avg Sq Ft</th>
-                  <th style={{ width: "120px" }}>Monthly Rent ($)</th>
-                  <th style={{ width: "120px" }}>Monthly GPR ($)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unitMix.map((row) => {
-                  const uCount = Number(row.units) || 0;
-                  const uRent = Number(row.rent) || 0;
-                  const rowGpr = uCount * uRent;
-                  return (
-                    <tr key={row.id}>
-                      <td style={{ fontWeight: 600 }}>{row.name}</td>
-                      <td>
-                        <NumberInput
-                          value={row.units}
-                          onChange={(v) => updateUnitMixRow(row.id, "units", v)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="1"
-                          value={row.bedsPerUnit}
-                          onChange={(e) => updateUnitMixRow(row.id, "bedsPerUnit", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <NumberInput
-                          value={row.avgSqFt}
-                          onChange={(v) => updateUnitMixRow(row.id, "avgSqFt", v)}
-                        />
-                      </td>
-                      <td>
-                        <NumberInput
-                          value={row.rent}
-                          onChange={(v) => updateUnitMixRow(row.id, "rent", v)}
-                        />
-                      </td>
-                      <td style={{ fontWeight: 600, color: "#1e293b" }}>
-                        ${rowGpr.toLocaleString()}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="table-scroll">
+              <table className="unit-mix-table">
+                <thead>
+                  <tr>
+                    <th>Unit Type</th>
+                    <th style={{ width: "90px" }}>Units</th>
+                    <th style={{ width: "90px" }}>Beds/Unit</th>
+                    <th style={{ width: "100px" }}>Avg Sq Ft</th>
+                    <th style={{ width: "120px" }}>Monthly Rent / Unit ($)</th>
+                    <th style={{ width: "120px" }}>Monthly GPR ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unitMix.map((row) => {
+                    const uCount = Number(row.units) || 0;
+                    const uRent = Number(row.rent) || 0;
+                    const rowGpr = uCount * uRent;
+                    return (
+                      <tr key={row.id}>
+                        <td style={{ fontWeight: 600 }}>{row.name}</td>
+                        <td>
+                          <NumberInput
+                            aria-label={`${row.name}: units`}
+                            value={row.units}
+                            onChange={(v) => updateUnitMixRow(row.id, "units", v)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min="1"
+                            aria-label={`${row.name}: beds per unit`}
+                            value={row.bedsPerUnit}
+                            onChange={(e) => updateUnitMixRow(row.id, "bedsPerUnit", e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <NumberInput
+                            aria-label={`${row.name}: average square feet`}
+                            value={row.avgSqFt}
+                            onChange={(v) => updateUnitMixRow(row.id, "avgSqFt", v)}
+                          />
+                        </td>
+                        <td>
+                          <NumberInput
+                            aria-label={`${row.name}: monthly rent per unit`}
+                            value={row.rent}
+                            onChange={(v) => updateUnitMixRow(row.id, "rent", v)}
+                          />
+                        </td>
+                        <td style={{ fontWeight: 600, color: "#1e293b" }}>
+                          ${rowGpr.toLocaleString()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
             <div className="unit-mix-summary-bar">
               <div className="unit-mix-summary-item">
@@ -1090,6 +1241,12 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 <span className="label">Avg Rent/Unit:</span>
                 <span className="val">${Math.round(weightedAvgRentPerUnit).toLocaleString()}</span>
               </div>
+              {!isPerUnit && (
+                <div className="unit-mix-summary-item">
+                  <span className="label">Avg Rent/Bed:</span>
+                  <span className="val">${mixTotals.avgRentPerBed.toFixed(2)}</span>
+                </div>
+              )}
               <div className="unit-mix-summary-item">
                 <span className="label">Avg Rent/SqFt:</span>
                 <span className="val">${weightedAvgRentPerSqFt.toFixed(2)}/sf</span>
@@ -1110,9 +1267,10 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
 
       {/* Leasing Mode & Roll-Up GPR */}
       <h3>Leasing &amp; GPR</h3>
-      <div className="leasing-toggle">
+      <div className="leasing-toggle" role="group" aria-label="Leasing mode">
         <button
           type="button"
+          aria-pressed={isPerUnit}
           className={isPerUnit ? "active" : ""}
           onClick={() => set("leasing_mode", "per_unit")}
         >
@@ -1120,6 +1278,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
         </button>
         <button
           type="button"
+          aria-pressed={!isPerUnit}
           className={!isPerUnit ? "active" : ""}
           onClick={() => set("leasing_mode", "per_bed")}
         >
@@ -1135,7 +1294,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 id="unit_count"
                 value={form.unit_count}
                 onChange={(v) => set("unit_count", v)}
-                aria-invalid={!!fieldErrors.unit_count}
+                {...errorProps("unit_count")}
               />
               {fieldError("unit_count")}
             </div>
@@ -1145,7 +1304,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 id="monthly_rent_per_unit"
                 value={form.monthly_rent_per_unit}
                 onChange={(v) => set("monthly_rent_per_unit", v)}
-                aria-invalid={!!fieldErrors.monthly_rent_per_unit}
+                {...errorProps("monthly_rent_per_unit")}
               />
               {fieldError("monthly_rent_per_unit")}
             </div>
@@ -1158,7 +1317,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 id="bed_count"
                 value={form.bed_count}
                 onChange={(v) => set("bed_count", v)}
-                aria-invalid={!!fieldErrors.bed_count}
+                {...errorProps("bed_count")}
               />
               {fieldError("bed_count")}
             </div>
@@ -1168,7 +1327,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
                 id="monthly_rent_per_bed"
                 value={form.monthly_rent_per_bed}
                 onChange={(v) => set("monthly_rent_per_bed", v)}
-                aria-invalid={!!fieldErrors.monthly_rent_per_bed}
+                {...errorProps("monthly_rent_per_bed")}
               />
               {fieldError("monthly_rent_per_bed")}
             </div>
@@ -1183,7 +1342,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.vacancy_rate_pct}
             onChange={(e) => set("vacancy_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.vacancy_rate_pct}
+            {...errorProps("vacancy_rate_pct")}
           />
           {fieldError("vacancy_rate_pct")}
         </div>
@@ -1193,7 +1352,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             id="other_income_annual"
             value={form.other_income_annual}
             onChange={(v) => set("other_income_annual", v)}
-            aria-invalid={!!fieldErrors.other_income_annual}
+            {...errorProps("other_income_annual")}
           />
           {fieldError("other_income_annual")}
         </div>
@@ -1205,7 +1364,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="any"
             value={form.other_income_growth_rate_pct}
             onChange={(e) => set("other_income_growth_rate_pct", e.target.value)}
+            {...errorProps("other_income_growth_rate_pct")}
           />
+          {fieldError("other_income_growth_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="credit_loss_rate_pct">Bad debt &amp; concessions (% of GPR)</label>
@@ -1216,7 +1377,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="any"
             value={form.credit_loss_rate_pct}
             onChange={(e) => set("credit_loss_rate_pct", e.target.value)}
+            {...errorProps("credit_loss_rate_pct")}
           />
+          {fieldError("credit_loss_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="management_fee_rate_pct">Management fee (% of EGI)</label>
@@ -1227,7 +1390,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="any"
             value={form.management_fee_rate_pct}
             onChange={(e) => set("management_fee_rate_pct", e.target.value)}
+            {...errorProps("management_fee_rate_pct")}
           />
+          {fieldError("management_fee_rate_pct")}
         </div>
         <div className="field">
           <label htmlFor="replacement_reserve_per_unit_or_bed">
@@ -1240,7 +1405,9 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="any"
             value={form.replacement_reserve_per_unit_or_bed}
             onChange={(e) => set("replacement_reserve_per_unit_or_bed", e.target.value)}
+            {...errorProps("replacement_reserve_per_unit_or_bed")}
           />
+          {fieldError("replacement_reserve_per_unit_or_bed")}
         </div>
       </div>
 
@@ -1252,7 +1419,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             id="opex_annual"
             value={form.opex_annual}
             onChange={(v) => set("opex_annual", v)}
-            aria-invalid={!!fieldErrors.opex_annual}
+            {...errorProps("opex_annual")}
           />
           {fieldError("opex_annual")}
         </div>
@@ -1265,7 +1432,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.expense_growth_rate_pct}
             onChange={(e) => set("expense_growth_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.expense_growth_rate_pct}
+            {...errorProps("expense_growth_rate_pct")}
           />
           {fieldError("expense_growth_rate_pct")}
         </div>
@@ -1277,7 +1444,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.rent_growth_rate_pct}
             onChange={(e) => set("rent_growth_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.rent_growth_rate_pct}
+            {...errorProps("rent_growth_rate_pct")}
           />
           {fieldError("rent_growth_rate_pct")}
         </div>
@@ -1290,7 +1457,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             max="12"
             value={form.lease_expiration_month}
             onChange={(e) => set("lease_expiration_month", e.target.value)}
-            aria-invalid={!!fieldErrors.lease_expiration_month}
+            {...errorProps("lease_expiration_month")}
           />
           {fieldError("lease_expiration_month")}
         </div>
@@ -1302,7 +1469,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             id="turnover_cost_per_unit_or_bed"
             value={form.turnover_cost_per_unit_or_bed}
             onChange={(v) => set("turnover_cost_per_unit_or_bed", v)}
-            aria-invalid={!!fieldErrors.turnover_cost_per_unit_or_bed}
+            {...errorProps("turnover_cost_per_unit_or_bed")}
           />
           {fieldError("turnover_cost_per_unit_or_bed")}
         </div>
@@ -1315,7 +1482,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.annual_turnover_rate_pct}
             onChange={(e) => set("annual_turnover_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.annual_turnover_rate_pct}
+            {...errorProps("annual_turnover_rate_pct")}
           />
           {fieldError("annual_turnover_rate_pct")}
         </div>
@@ -1330,7 +1497,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             id="purchase_price"
             value={form.purchase_price}
             onChange={(v) => set("purchase_price", v)}
-            aria-invalid={!!fieldErrors.purchase_price}
+            {...errorProps("purchase_price")}
           />
           {fieldError("purchase_price")}
         </div>
@@ -1340,7 +1507,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             id="closing_costs"
             value={form.closing_costs}
             onChange={(v) => set("closing_costs", v)}
-            aria-invalid={!!fieldErrors.closing_costs}
+            {...errorProps("closing_costs")}
           />
           {fieldError("closing_costs")}
         </div>
@@ -1365,7 +1532,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             min="0"
             value={form.hold_period_years}
             onChange={(e) => set("hold_period_years", e.target.value)}
-            aria-invalid={!!fieldErrors.hold_period_years}
+            {...errorProps("hold_period_years")}
           />
           {fieldError("hold_period_years")}
         </div>
@@ -1378,7 +1545,7 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.01"
             value={form.exit_cap_rate_pct}
             onChange={(e) => set("exit_cap_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.exit_cap_rate_pct}
+            {...errorProps("exit_cap_rate_pct")}
           />
           {fieldError("exit_cap_rate_pct")}
         </div>
@@ -1391,18 +1558,22 @@ export function DealForm({ initial, onSave, onCancel }: DealFormProps) {
             step="0.1"
             value={form.selling_costs_rate_pct}
             onChange={(e) => set("selling_costs_rate_pct", e.target.value)}
-            aria-invalid={!!fieldErrors.selling_costs_rate_pct}
+            {...errorProps("selling_costs_rate_pct")}
           />
           {fieldError("selling_costs_rate_pct")}
         </div>
       </div>
 
-      {Object.keys(fieldErrors).length > 0 && (
-        <p className="field error">Please fix the highlighted fields above.</p>
+      {(Object.keys(fieldErrors).length > 0 || stackErrors.length > 0) && (
+        <p className="field error form-error-summary" role="alert" tabIndex={-1}>
+          {Object.keys(fieldErrors).length > 0
+            ? "Please fix the highlighted fields above."
+            : "Please fix the capital stack problems above."}
+        </p>
       )}
 
       {submitError && (
-        <div className="status-banner error" role="alert">
+        <div className="status-banner error form-error-summary" role="alert" tabIndex={-1}>
           {submitError}
         </div>
       )}
