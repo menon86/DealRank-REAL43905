@@ -85,7 +85,13 @@ def get_treasury_10y(*, use_cache: bool = True) -> TreasuryQuote:
     if use_cache and _cache is not None and now - _cache[0] < CACHE_TTL_SECONDS:
         return _cache[1]
     settings = get_settings()
-    fallback = TreasuryQuote(yield_=settings.TREASURY_10Y_FALLBACK, as_of=None, source="fallback")
+    # A stale live quote (its as_of date is shown to the user) beats a
+    # hardcoded constant when every source is down.
+    fallback = (
+        _cache[1]
+        if _cache is not None
+        else TreasuryQuote(yield_=settings.TREASURY_10Y_FALLBACK, as_of=None, source="fallback")
+    )
     if use_cache and _last_failure is not None and now - _last_failure < FAILURE_BACKOFF_SECONDS:
         return fallback
     today = date.today()

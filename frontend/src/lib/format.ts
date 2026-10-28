@@ -17,13 +17,27 @@ export function percentInputToFraction(percentInput: string): number {
   return Number.isFinite(parsed) ? Number((parsed / 100).toFixed(8)) : 0;
 }
 
+/** "50" basis points (whatever the user typed) -> 0.005; unparseable input is 0. */
+export function bpsInputToFraction(bpsInput: string): number {
+  const parsed = Number.parseFloat(bpsInput);
+  return Number.isFinite(parsed) ? Number((parsed / 10000).toFixed(8)) : 0;
+}
+
+/**
+ * True for null, NaN and ±Infinity: values a formatter shows as a dash. (The
+ * guard only narrows the false branch, to a finite number.)
+ */
+function isMissing(value: number | null): value is null {
+  return value === null || !Number.isFinite(value);
+}
+
 export function formatPercent(fraction: number | null, digits = 2): string {
-  if (fraction === null || Number.isNaN(fraction)) return "—";
+  if (isMissing(fraction)) return "—";
   return `${(fraction * 100).toFixed(digits)}%`;
 }
 
 export function formatMoney(amount: number | null, digits = 0): string {
-  if (amount === null || Number.isNaN(amount)) return "—";
+  if (isMissing(amount)) return "—";
   return amount.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
@@ -33,12 +47,12 @@ export function formatMoney(amount: number | null, digits = 0): string {
 }
 
 export function formatMultiple(value: number | null, digits = 2): string {
-  if (value === null || Number.isNaN(value)) return "—";
+  if (isMissing(value)) return "—";
   return `${value.toFixed(digits)}x`;
 }
 
 export function formatNumber(value: number | null, digits = 2): string {
-  if (value === null || Number.isNaN(value)) return "—";
+  if (isMissing(value)) return "—";
   return value.toFixed(digits);
 }
 
