@@ -42,6 +42,25 @@ services:
         value: info
       - key: CORS_ORIGINS
         value: https://dealrank-frontend.onrender.com
+      # Sign-in (README "Sign-in"). Set the ids in the dashboard.
+      - key: AUTH_REQUIRED
+        value: "true"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_TENANT_ID
+        sync: false
+      - key: ALLOWED_EMAIL_DOMAINS
+        sync: false
+      # Email that owns the sample deals (and any deals from before sign-in).
+      - key: SEED_OWNER_EMAIL
+        sync: false
+      # "Try the demo" button. Generate DEMO_TOKEN_SECRET once and keep it.
+      - key: DEMO_ENABLED
+        value: "true"
+      - key: DEMO_TOKEN_SECRET
+        generateValue: true
 
   - type: web
     name: dealrank-frontend
@@ -54,6 +73,15 @@ services:
         value: "20"
       - key: VITE_API_BASE_URL
         value: https://dealrank-api.onrender.com
+      # Same Google / Microsoft ids as the API. Build-time: redeploy after changing.
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
+      - key: VITE_MICROSOFT_CLIENT_ID
+        sync: false
+      - key: VITE_MICROSOFT_TENANT_ID
+        sync: false
+      - key: VITE_DEMO_ENABLED
+        value: "true"
     routes:
       # SPA fallback — client-side tab state (Shell.tsx) isn't
       # route-based, but this keeps a hard refresh or a direct link

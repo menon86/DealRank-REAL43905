@@ -14,6 +14,7 @@
  * just fine, so requests just send the DealInputFields numbers as-is.
  */
 
+import { apiFetch } from "./auth";
 import type {
   AnnualCashFlowOut,
   CapitalStackLayer,
@@ -240,7 +241,7 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const method = options?.method ?? "GET";
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await apiFetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
@@ -428,7 +429,7 @@ export async function importSpreadsheet(file: File): Promise<ImportProposal> {
   const body = new FormData();
   body.append("file", file);
   // No Content-Type header: the browser sets the multipart boundary.
-  const res = await fetch(`${API_BASE_URL}/deals/import`, { method: "POST", body });
+  const res = await apiFetch(`${API_BASE_URL}/deals/import`, { method: "POST", body });
   if (!res.ok) {
     throw new ApiError("POST", "/deals/import", res.status, await res.text());
   }
@@ -437,7 +438,7 @@ export async function importSpreadsheet(file: File): Promise<ImportProposal> {
 
 /** GET /deals/import/template, saved through the browser's download flow. */
 export async function downloadImportTemplate(): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/deals/import/template`);
+  const res = await apiFetch(`${API_BASE_URL}/deals/import/template`);
   if (!res.ok) {
     throw new ApiError("GET", "/deals/import/template", res.status, await res.text());
   }
@@ -475,7 +476,7 @@ export async function downloadReport(
   basis: number | RiskReportParams,
 ): Promise<void> {
   const url = buildReportUrl(kind, dealIds, basis);
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) {
     throw new ApiError("GET", `/reports/${kind}`, res.status, await res.text());
   }
