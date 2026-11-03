@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatMoney, formatNumber } from "../lib/format";
+import { formatMoney, formatMultiple, formatPercent } from "../lib/format";
 import type { AnnualCashFlowOut, DealOut, MetricsOut } from "../lib/types";
 
 interface ProjectionTableProps {
@@ -62,11 +62,13 @@ const ROWS: ProjectionRow[] = [
   {
     label: "Senior DSCR",
     value: (cf) =>
-      cf.senior_debt_service === 0 ? "—" : formatNumber(cf.noi / cf.senior_debt_service),
+      cf.senior_debt_service === 0
+        ? "n/a"
+        : formatMultiple(cf.noi / cf.senior_debt_service),
   },
   {
     label: "Combined DSCR",
-    value: (cf) => (cf.debt_service === 0 ? "—" : formatNumber(cf.noi / cf.debt_service)),
+    value: (cf) => (cf.debt_service === 0 ? "n/a" : formatMultiple(cf.noi / cf.debt_service)),
   },
   { label: "Debt balance (year end)", value: (cf) => formatMoney(cf.ending_loan_balance) },
 ];
@@ -87,13 +89,12 @@ export function ProjectionTable({ deals, metricsByDealId }: ProjectionTableProps
     <section className="projection" aria-labelledby="projection-title">
       <div className="projection-header">
         <h3 id="projection-title">Year-by-year projection</h3>
-        <div className="segmented" role="tablist" aria-label="Deal">
+        <div className="segmented" role="group" aria-label="Deal shown in the projection">
           {deals.map((d) => (
             <button
               key={d.id}
               type="button"
-              role="tab"
-              aria-selected={d.id === deal.id}
+              aria-pressed={d.id === deal.id}
               className={d.id === deal.id ? "active" : ""}
               onClick={() => setSelectedId(d.id)}
             >
@@ -138,8 +139,7 @@ export function ProjectionTable({ deals, metricsByDealId }: ProjectionTableProps
           </div>
           <p className="card-subtitle projection-note">
             Exit at the end of year {deal.hold_period_years}: year {deal.hold_period_years + 1} NOI
-            of {formatMoney(metrics.forward_noi)} ÷ {formatNumber(deal.exit_cap_rate * 100)}% exit
-            cap = {formatMoney(metrics.exit_value)} exit value.
+            of {formatMoney(metrics.forward_noi)} ÷ {formatPercent(deal.exit_cap_rate)} exit cap = {formatMoney(metrics.exit_value)} exit value.
           </p>
         </>
       )}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GeographyCombobox } from "./GeographyCombobox";
 import * as client from "../lib/client";
 import { formatMoney, formatPercent } from "../lib/format";
@@ -33,31 +33,58 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
   const [result, setResult] = useState<RentCheckOut | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [geoLoading, setGeoLoading] = useState(true);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [geoReloadKey, setGeoReloadKey] = useState(0);
+  // Bumped per check and whenever the deal or geography changes, so a
+  // response for a previous selection is ignored.
+  const checkRequestIdRef = useRef(0);
 
   useEffect(() => {
+    let cancelled = false;
+    setGeoLoading(true);
+    setGeoError(null);
     client
       .listGeographies()
       .then((g) => {
+        if (cancelled) return;
         setGeographies(g);
         if (g.length > 0) setGeography((prev) => prev || g[0].geography);
       })
-      .catch((err) => setError(client.describeError(err)));
-  }, []);
+      .catch((err) => {
+        if (!cancelled) setGeoError(client.describeError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setGeoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [geoReloadKey]);
 
   useEffect(() => {
     if (!dealId && deals.length > 0) setDealId(defaultDealId(deals));
   }, [deals, dealId]);
 
-  useEffect(() => setResult(null), [dealId, geography]);
+  useEffect(() => {
+    checkRequestIdRef.current += 1;
+    setResult(null);
+    setLoading(false);
+    setError(null);
+  }, [dealId, geography]);
 
   async function runCheck() {
+    const requestId = ++checkRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      setResult(await client.rentCheck(dealId, geography.trim()));
+      const checked = await client.rentCheck(dealId, geography.trim());
+      if (requestId !== checkRequestIdRef.current) return;
+      setResult(checked);
+      setLoading(false);
     } catch (err) {
+      if (requestId !== checkRequestIdRef.current) return;
       setError(client.describeError(err));
-    } finally {
       setLoading(false);
     }
   }
@@ -84,7 +111,15 @@ export function MarketCheckView({ deals }: MarketCheckViewProps) {
         <div className="empty-state">Add a deal on the Deals tab first.</div>
       ) : (
         <>
-          {geographies.length === 0 && (
+          {geoError && (
+            <div className="status-banner error" role="alert">
+              Couldn&apos;t load the list of market geographies. {geoError}
+              <button type="button" className="link" onClick={() => setGeoReloadKey((k) => k + 1)}>
+                Retry
+              </button>
+            </div>
+          )}
+          {!geoLoading && !geoError && geographies.length === 0 && (
             <div className="status-banner info" role="status">
               No market rent data is loaded yet. Download a ZORI or Apartment List CSV and load it
               with <code>python ingest_market_rents.py zillow_zori &lt;file.csv&gt;</code>.

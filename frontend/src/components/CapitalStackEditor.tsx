@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   GROUP_LABELS,
   LAYER_OPTIONS,
@@ -32,6 +33,9 @@ interface CapitalStackEditorProps {
    */
   defaultTreasuryPct: string;
 }
+
+/** How long the "Undo" for a removed layer stays available. */
+const UNDO_MS = 8000;
 
 const GROUP_ORDER: LayerGroup[] = ["senior", "subordinate", "equity"];
 
@@ -91,8 +95,26 @@ export function CapitalStackEditor({
     onChange(withDefaultTreasury([...layers, blankLayer(type)], defaultTreasuryPct));
   }
 
+  // The last removed layer and where it was, so a mis-click can be undone.
+  const [removed, setRemoved] = useState<{ layer: LayerForm; index: number } | null>(null);
+  useEffect(() => {
+    if (!removed) return;
+    const timer = setTimeout(() => setRemoved(null), UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [removed]);
+
   function remove(key: string) {
+    const index = layers.findIndex((layer) => layer.key === key);
+    if (index >= 0) setRemoved({ layer: layers[index], index });
     onChange(layers.filter((layer) => layer.key !== key));
+  }
+
+  function undoRemove() {
+    if (!removed) return;
+    const next = [...layers];
+    next.splice(Math.min(removed.index, next.length), 0, removed.layer);
+    onChange(next);
+    setRemoved(null);
   }
 
   // --- Live summary ---
@@ -126,6 +148,14 @@ export function CapitalStackEditor({
 
       <div className="capital-stack-body">
         <div className="capital-stack-layers">
+          {removed && (
+            <div className="status-banner info" role="status">
+              Removed {layerDisplayName(removed.layer.type, removed.layer.label)}.
+              <button type="button" className="link" onClick={undoRemove}>
+                Undo
+              </button>
+            </div>
+          )}
           {layers.length === 0 && (
             <div className="empty-state">No layers yet. Add the senior loan first.</div>
           )}
@@ -146,7 +176,7 @@ export function CapitalStackEditor({
         </div>
 
         {barLayers.length > 0 && (
-          <div className="stack-visual" aria-label="Capital stack, senior debt at the bottom">
+          <div className="stack-visual">
             <div className="stack-bar" role="img" aria-hidden="true">
               {barLayers.map((layer, i) => (
                 <div

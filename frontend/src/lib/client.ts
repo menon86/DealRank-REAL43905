@@ -224,6 +224,7 @@ function parseExcluded(raw: ExcludedDealOut): ExcludedDealOut {
     deal: parseDealOut(raw.deal),
     metrics: parseMetricsOut(raw.metrics),
     hurdle: parseHurdle(raw.hurdle),
+    spread: toNumber(raw.spread),
   };
 }
 
@@ -366,6 +367,7 @@ export async function monteCarlo(
     hurdle: toNumber(raw.hurdle),
     unlevered_irr: parseDistribution(raw.unlevered_irr),
     levered_irr: parseDistribution(raw.levered_irr),
+    unlevered_irr_before_costs: parseDistribution(raw.unlevered_irr_before_costs),
     unlevered_histogram: raw.unlevered_histogram.map((b) => numify(b, ["low", "high"])),
     prob_below_hurdle: toNumber(raw.prob_below_hurdle),
     prob_dscr_below_minimum: toNumber(raw.prob_dscr_below_minimum),
@@ -390,6 +392,20 @@ export async function rentCheck(dealId: string, geography: string): Promise<Rent
 }
 
 /**
+ * One entry of a FastAPI 422 body as "field: message", so the user can tell
+ * which input was rejected. `loc` is a path like ["body", "capital_stack",
+ * 0, "spread"]; the request-part prefix is dropped ("capital_stack.0.spread").
+ */
+export function describeValidationItem(item: { loc?: unknown; msg?: string }): string | null {
+  if (!item.msg) return null;
+  const path = Array.isArray(item.loc)
+    ? item.loc.filter((part, i) => !(i === 0 && ["body", "query", "path"].includes(String(part))))
+    : [];
+  const field = path.map(String).join(".");
+  return field ? `${field}: ${item.msg}` : item.msg;
+}
+
+/**
  * Turns anything a client call can throw into one sentence a user can
  * act on. FastAPI error bodies are {"detail": "..."} (a string for 404s,
  * a list of field errors for 422s); a TypeError from fetch itself means
@@ -404,7 +420,7 @@ export function describeError(err: unknown): string {
         detail = parsed.detail;
       } else if (Array.isArray(parsed.detail)) {
         detail = parsed.detail
-          .map((d: { msg?: string }) => d.msg)
+          .map((d: { loc?: unknown; msg?: string }) => describeValidationItem(d))
           .filter(Boolean)
           .join("; ");
       }

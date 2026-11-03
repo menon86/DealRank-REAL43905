@@ -18,6 +18,8 @@
   --color-negative: #b42318;
   --brass: #b3812a;
   --brass-bg: #fbf3e2;
+  /* Brass dark enough for text on the cream rows (>= 5:1 on #f6e8c6). */
+  --brass-text: #80570f;
   --radius: 12px;
   --radius-sm: 7px;
   --shadow-card: none;
@@ -409,7 +411,7 @@ table.ranking-table tbody tr.rank-1 td.col-ranking-basis {
 
 table.ranking-table tbody tr.rank-1 td.rank-cell,
 table.ranking-table tbody tr.rank-1 td.deal-cell {
-  color: var(--brass);
+  color: var(--brass-text);
 }
 
 table.ranking-table tbody tr.rank-1 td.rank-cell {

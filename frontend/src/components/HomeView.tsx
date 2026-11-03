@@ -43,7 +43,7 @@ const FEATURES: { tab: Tab; title: string; blurb: string }[] = [
   {
     tab: "rank",
     title: "Rank",
-    blurb: "Levered IRR spread over your hurdle rate, best deal first.",
+    blurb: "Unlevered IRR spread over your hurdle rate, best deal first.",
   },
   {
     tab: "risk",
@@ -78,7 +78,8 @@ export function HomeView({
   onNavigate,
 }: HomeViewProps) {
   const top = rankedDeals.find((r) => r.rank === 1) ?? rankedDeals[0];
-  const topIrr = top?.metrics.levered_irr ?? null;
+  // Ranking sorts on unlevered IRR, so that is the figure shown beside the top deal.
+  const topIrr = top?.metrics.unlevered_irr ?? null;
 
   return (
     <div className="home">
@@ -133,7 +134,7 @@ export function HomeView({
             <span className="home-stat__value">{top ? top.deal.name : "—"}</span>
             <span className="home-stat__label">
               {top
-                ? `Top ranked${topIrr !== null ? ` · ${formatPercent(topIrr)} levered IRR` : ""}`
+                ? `Top ranked${topIrr !== null ? ` · ${formatPercent(topIrr)} unlevered IRR` : ""}`
                 : "Top ranked deal"}
             </span>
           </div>

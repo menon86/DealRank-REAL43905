@@ -154,6 +154,8 @@ class ExcludedRow:
     metrics: DealMetrics
     hurdle: HurdleOut
     reason: str
+    # Unlevered IRR before costs minus the hurdle; None if the IRR didn't converge.
+    spread: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -206,7 +208,16 @@ def compute_risk_ranking(db: Session, payload: RiskRankRequest) -> RiskRanking:
         elif metrics.unlevered_irr_before_costs is None:
             reason = "Unlevered IRR did not converge."
         if reason:
-            excluded.append(ExcludedRow(deal=deal, metrics=metrics, hurdle=hurdle, reason=reason))
+            gross_irr = metrics.unlevered_irr_before_costs
+            excluded.append(
+                ExcludedRow(
+                    deal=deal,
+                    metrics=metrics,
+                    hurdle=hurdle,
+                    reason=reason,
+                    spread=None if gross_irr is None else gross_irr - hurdle.total,
+                )
+            )
             continue
         spread = metrics.unlevered_irr_before_costs - hurdle.total
         key = str(deal.id)
@@ -258,6 +269,7 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
     return RiskRankResponse(
         treasury=treasury_out(result.treasury),
         dscr_minimum=result.dscr_minimum,
+        debt_yield_minimum=result.debt_yield_minimum,
         weights=WeightsOut(
             irr=result.weights.irr, cash_flow=result.weights.cash_flow, risk=result.weights.risk
         ),
@@ -283,6 +295,7 @@ def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) 
                 metrics=MetricsOut.model_validate(e.metrics),
                 hurdle=e.hurdle,
                 reason=e.reason,
+                spread=e.spread,
             )
             for e in result.excluded
         ],

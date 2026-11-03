@@ -30,6 +30,19 @@ function hurdleUsed(entry: RankedDealOut): number | null {
   return irr - entry.spread;
 }
 
+const HURDLE_LIMIT_PCT = 100;
+
+/** Why a typed hurdle (in %) can't be used, or null when it can. */
+function hurdleInputError(value: string): string | null {
+  if (value.trim() === "") return "Enter a hurdle rate.";
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return "Enter the hurdle as a number, e.g. 8.";
+  if (Math.abs(parsed) > HURDLE_LIMIT_PCT) {
+    return `Enter a hurdle between −${HURDLE_LIMIT_PCT}% and ${HURDLE_LIMIT_PCT}%.`;
+  }
+  return null;
+}
+
 export function RankingView({
   selectedDealIds,
   hurdleRate,
@@ -41,6 +54,10 @@ export function RankingView({
 }: RankingViewProps) {
   const [hurdleInput, setHurdleInput] = useState(fractionToPercentInput(hurdleRate));
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** A typed hurdle not yet sent (waiting on the debounce). */
+  const pendingRef = useRef<number | null>(null);
+  const onChangeRef = useRef(onHurdleRateChange);
+  onChangeRef.current = onHurdleRateChange;
 
   // Only resync the text box when the rate changed from outside what the
   // user is typing, so partial input like "7." or an empty box isn't rewritten.
@@ -52,19 +69,35 @@ export function RankingView({
     );
   }, [hurdleRate]);
 
+  /** Sends a pending hurdle now instead of waiting for the debounce. */
+  function flushHurdle() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = null;
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    if (pending !== null) onChangeRef.current(pending);
+  }
+
+  // Leaving the tab mid-debounce still applies what was typed.
   useEffect(
     () => () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (pendingRef.current !== null) onChangeRef.current(pendingRef.current);
     },
     [],
   );
+
+  const hurdleError = hurdleInputError(hurdleInput);
 
   // Re-rank once typing pauses, and never for a blank/invalid box.
   function commitHurdle(value: string) {
     setHurdleInput(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (value.trim() === "" || !Number.isFinite(Number.parseFloat(value))) return;
-    debounceRef.current = setTimeout(() => onHurdleRateChange(percentInputToFraction(value)), 300);
+    debounceRef.current = null;
+    pendingRef.current = null;
+    if (hurdleInputError(value) !== null) return;
+    pendingRef.current = percentInputToFraction(value);
+    debounceRef.current = setTimeout(flushHurdle, 300);
   }
 
   if (selectedDealIds.length === 0) {
@@ -103,7 +136,8 @@ export function RankingView({
             <dt>Ranking basis</dt>
             <dd>
               <strong>Unlevered IRR</strong> — the property-level return with no debt: full purchase
-              price plus closing costs out, NOI in each year, sale proceeds before any loan payoff.
+              price plus closing costs out, NOI less replacement reserves in each year, and exit
+              value less selling costs at the sale, before any loan payoff.
             </dd>
           </div>
           <div>
@@ -144,9 +178,19 @@ export function RankingView({
           id="hurdle-rate"
           type="number"
           step="0.1"
+          min={-HURDLE_LIMIT_PCT}
+          max={HURDLE_LIMIT_PCT}
           value={hurdleInput}
+          aria-invalid={hurdleError !== null}
+          aria-describedby={hurdleError ? "hurdle-rate-error" : undefined}
           onChange={(e) => commitHurdle(e.target.value)}
+          onBlur={flushHurdle}
         />
+        {hurdleError && (
+          <span id="hurdle-rate-error" className="field-error-text" role="alert">
+            {hurdleError} Still ranking at {formatPercent(hurdleRate)}.
+          </span>
+        )}
         {loading && !error && (
           <span className="inline-status" role="status">
             <span className="spinner" aria-hidden="true" /> Re-ranking…

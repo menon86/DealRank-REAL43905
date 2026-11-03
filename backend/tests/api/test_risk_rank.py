@@ -81,6 +81,8 @@ def test_dscr_gate_excludes_rather_than_ranks_last(client, deal_ids):
     assert [e["deal"]["name"] for e in body["excluded"]] == ["Meridian Urban Mid-Rise"]
     assert "0.87x" in body["excluded"][0]["reason"]
     assert "1.25x" in body["excluded"][0]["reason"]
+    assert body["excluded"][0]["spread"] is not None
+    assert body["debt_yield_minimum"] is None
 
     stricter = _rank(client, deal_ids, dscr_minimum="1.4")
     assert [r["deal"]["name"] for r in stricter["ranked"]] == ["Willowbrook Suburban Garden"]

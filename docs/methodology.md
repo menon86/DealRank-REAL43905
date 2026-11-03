@@ -23,8 +23,10 @@ Vacancy loss = GPR x vacancy_rate
 EGI          = GPR - Vacancy loss + other_income_annual
 ```
 
-GPR, and everything downstream of it, grows at `rent_growth_rate` compounding annually:
-`year_N_GPR = year_1_GPR x (1 + rent_growth_rate) ^ (N - 1)`.
+GPR grows at `rent_growth_rate` compounding annually:
+`year_N_GPR = year_1_GPR x (1 + rent_growth_rate) ^ (N - 1)`. Vacancy and credit loss are
+percentages of GPR, so they follow it; other income grows at its own `other_income_growth_rate`
+(default 0) and operating expenses at `expense_growth_rate`.
 
 ## Expenses and turnover
 
@@ -131,6 +133,13 @@ Reserves are paid **below NOI**: NOI, the going-in cap rate, DSCR and the exit v
 reserves, while levered and unlevered cash flow (and so every IRR and the multiple) are after them.
 Property-tax reassessment on sale is not modeled; put an expected post-sale tax level in OpEx.
 
+**Reserves basis.** Cash flows and IRRs are after reserves; exit value, the cap rate and DSCR are
+before them. The risk-adjusted hurdle is built from survey cap rates (quoted before reserves, the
+usual convention), so a deal's IRR before costs sits about `reserves / price` below going-in cap
+plus growth. A deal that enters reserves is therefore measured slightly more strictly against the
+hurdle than one that leaves them at 0. Lenders often size DSCR after reserves; this model's gate is
+before them.
+
 **Input ranges.** Rents, price, counts, hold and exit cap must be above zero; vacancy, turnover,
 credit loss and management fee are 0-100%; expense growth, closing and selling costs, OpEx, reserves
 and every capital stack amount, rate and fee are non-negative; rent growth may be negative (a
@@ -170,8 +179,13 @@ See the docstring in `backend/app/engine/ranking.py`. How it ranks:
   1 - (all debt + preferred equity) / price (20% to 60%). All-cash counts as maximum coverage.
 - The return and cash-flow factors are unlevered. The safety factor is deliberately leverage-aware,
   so a non-zero risk weight lets financing choices move the order.
-- Rank order does not depend on the live Treasury (it shifts every deal's hurdle equally); only the
-  absolute spreads do.
+- With return-only ranking, rank order does not depend on the live Treasury (it shifts every deal's
+  hurdle equally); only the absolute spreads do. With preference weights it can: spreads are clamped
+  at the fixed anchors, so a large Treasury move can push a deal past an anchor and reorder close
+  scores.
+- Because the DSCR gate depends on the loan the analyst entered, a deal that borrows heavily
+  against a low cap rate (typical of garden and mid-rise) can be excluded while a less-levered deal
+  with a worse spread ranks. Excluded deals are listed with their spread so this is visible.
 - A warning is attached when the exit cap is below the going-in cap, because the return then leans
   on cap-rate compression.
 
@@ -211,8 +225,9 @@ The weighted average rent per unit, weighted average rent per bed, and weighted 
 ### 2. Housing-Type Specific Custom Inputs & Ancillary Revenue
 
 > **Status:** form-only helpers that total parking, storage, pet and package income into
-> `other_income_annual`. RUBS recovery, parental guarantees, bad debt, summer operations and
-> commercial vacancy are **not modeled**. Other income is held flat across the hold.
+> `other_income_annual`. RUBS recovery, parental guarantees, summer operations and commercial
+> vacancy are **not modeled**. Other income is held flat across the hold unless the deal's
+> `other_income_growth_rate` (default 0) is set.
 
 Different multifamily asset sub-classes feature fundamentally distinct revenue and operational expense drivers:
 
@@ -338,9 +353,13 @@ centred on the deal's own inputs. Exit cap and rent growth are correlated (defau
 markets tend to come with wider exit caps; adjustable per request). A draw applies to the **whole
 hold**, so this models uncertainty about the assumptions, not year-to-year volatility; interest
 rates, expense growth and the floating index are not varied. A run whose IRR doesn't converge counts
-as below the hurdle. The response always returns the seed used (one is drawn when none is sent), so
+as below the hurdle; runs without a levered IRR are left out of the levered distribution, and
+`levered_converged` reports how many remain (those are typically the worst outcomes, so the levered
+distribution is optimistic when it is below `simulations`). The response always returns the seed used (one is drawn when none is sent), so
 any run can be reproduced. When the hurdle is the risk-adjusted one, runs are compared on the IRR
-before closing and selling costs, the basis the hurdle is quoted on.
+before closing and selling costs, the basis the hurdle is quoted on. The response says which basis
+(`hurdle_basis`) and returns that distribution (`unlevered_irr_before_costs`) beside the after-cost
+one, because the headline histogram is after costs.
 
 ## Known limitations
 

@@ -98,11 +98,13 @@ class ExcludedDealOut(BaseModel):
     metrics: MetricsOut
     hurdle: HurdleOut
     reason: str
+    spread: Decimal | None = None  # unlevered IRR before costs - hurdle, shown even when excluded
 
 
 class RiskRankResponse(BaseModel):
     treasury: TreasuryOut
     dscr_minimum: Decimal
+    debt_yield_minimum: Decimal | None = None
     weights: WeightsOut
     ranked: list[RiskRankedDealOut]
     excluded: list[ExcludedDealOut]
@@ -164,13 +166,17 @@ class HistogramBinOut(BaseModel):
 
 class MonteCarloResponse(BaseModel):
     simulations: int
-    converged: int
+    converged: int  # runs with an unlevered IRR
+    levered_converged: int  # runs with a levered IRR (the rest are dropped from its distribution)
     seed: int  # always set: the one supplied, or the one drawn (re-send it to reproduce)
     hurdle: Decimal | None
     hurdle_source: str
     unlevered_irr: DistributionOut | None
     levered_irr: DistributionOut | None
+    unlevered_irr_before_costs: DistributionOut | None
     unlevered_histogram: list[HistogramBinOut]
+    # "after_costs" for a user hurdle, "before_costs" for the risk-adjusted one.
+    hurdle_basis: Literal["after_costs", "before_costs"]
     prob_below_hurdle: Decimal | None
     prob_dscr_below_minimum: Decimal | None
 

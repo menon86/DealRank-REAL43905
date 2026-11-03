@@ -96,3 +96,17 @@ export function unitMixFromTable(
     };
   });
 }
+
+/**
+ * A value as the user left it on the review screen, cleaned for the form:
+ * numeric fields lose currency symbols, thousands commas, percent signs and
+ * spaces ("$1,250", "5.5 %"). Anything that still isn't a number is kept
+ * as typed so the form's validation flags it rather than it silently
+ * becoming 0. Text and choice fields are only trimmed.
+ */
+export function cleanImportedValue(kind: ImportField["kind"], value: string): string {
+  const trimmed = value.trim();
+  if (kind === "text" || kind === "choice" || trimmed === "") return trimmed;
+  const cleaned = trimmed.replace(/[$,%\s]/g, "");
+  return cleaned !== "" && Number.isFinite(Number(cleaned)) ? cleaned : trimmed;
+}

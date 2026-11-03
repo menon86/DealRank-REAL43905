@@ -2170,3 +2170,50 @@ button.primary:disabled {
   font: inherit;
   font-size: 13px;
 }
+
+/* ---- Accessibility and small-screen fixes -------------------------------- */
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The unit mix scrolls sideways on a narrow screen instead of squashing. */
+.unit-mix-wrapper .table-scroll .unit-mix-table {
+  min-width: 640px;
+}
+
+/* At least 24 x 24 px touch targets for the small buttons. */
+.import-btn.unit-mix-toggle {
+  font-size: 12px;
+  padding: 4px 10px;
+  min-height: 28px;
+  min-width: 24px;
+}
+
+.dismiss-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+  color: inherit;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.comparison-table .stale-flag {
+  color: var(--color-negative);
+}

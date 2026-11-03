@@ -302,6 +302,8 @@ export interface ExcludedDealOut {
   metrics: MetricsOut;
   hurdle: HurdleOut;
   reason: string;
+  /** Unlevered IRR before costs minus the hurdle; null if the IRR didn't converge. */
+  spread: number | null;
 }
 
 export interface RiskRankResponse {
@@ -359,13 +361,20 @@ export interface HistogramBin {
 
 export interface MonteCarloResponse {
   simulations: number;
+  /** Runs with an unlevered IRR. */
   converged: number;
+  /** Runs with a levered IRR; runs without one are left out of its distribution. */
+  levered_converged: number;
   seed: number | null;
   hurdle: number | null;
   /** "user" | "risk_adjusted" */
   hurdle_source: string;
   unlevered_irr: Distribution | null;
   levered_irr: Distribution | null;
+  /** Unlevered IRR before closing and selling costs (the risk-adjusted hurdle's basis). */
+  unlevered_irr_before_costs: Distribution | null;
+  /** Which IRR prob_below_hurdle is measured on. */
+  hurdle_basis: "after_costs" | "before_costs";
   unlevered_histogram: HistogramBin[];
   prob_below_hurdle: number | null;
   prob_dscr_below_minimum: number | null;

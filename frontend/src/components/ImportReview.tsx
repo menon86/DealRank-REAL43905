@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   UNIT_MIX_ATTRIBUTES,
   candidateValue,
+  cleanImportedValue,
   describeCandidate,
   unitMixFromTable,
 } from "../lib/spreadsheetImport";
@@ -71,9 +72,10 @@ export function ImportReview({ proposal, onApply, onCancel }: ImportReviewProps)
   }
 
   function apply() {
+    const kinds = new Map(proposal.fields.map((f) => [f.key, f.kind]));
     const confirmed = Object.fromEntries(
       Object.entries(values)
-        .map(([k, v]) => [k, v.trim()] as const)
+        .map(([k, v]) => [k, cleanImportedValue(kinds.get(k) ?? "text", v)] as const)
         .filter(([, v]) => v !== ""),
     );
     onApply({

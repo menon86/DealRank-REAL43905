@@ -41,7 +41,8 @@ BPS = Decimal("10000")
 DEFAULT_DSCR_MINIMUM = Decimal("1.25")
 
 # An all-cash deal has no DSCR; for scoring it is treated as this very
-# comfortable coverage rather than as zero or infinity.
+# comfortable coverage rather than as zero or infinity. (Anything at or above
+# DSCR_ANCHORS' ceiling scores the same, so the exact value is cosmetic.)
 ALL_CASH_DSCR_CAP = Decimal("3")
 
 

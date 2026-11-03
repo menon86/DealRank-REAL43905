@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RankingSettings } from "./ChatPanel";
 import { ReportDownloads } from "./ReportDownloads";
 import * as client from "../lib/client";
@@ -48,6 +48,9 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Only the latest request may update state; an older response (or one
+  // superseded by inputs turning invalid) is dropped.
+  const requestIdRef = useRef(0);
 
   const dscrMinimum = Number.parseFloat(dscrInput);
   const treasuryOverride =
@@ -59,14 +62,18 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
   };
   const manualInvalid =
     mode === "manual" && manualWeights.irr + manualWeights.cash_flow + manualWeights.risk <= 0;
-  const inputsInvalid = !Number.isFinite(dscrMinimum) || dscrMinimum < 0 || manualInvalid;
+  const dscrInvalid = !Number.isFinite(dscrMinimum) || dscrMinimum < 0;
+  const inputsInvalid = dscrInvalid || manualInvalid;
 
   useEffect(() => {
+    const requestId = ++requestIdRef.current;
     if (selectedDealIds.length === 0 || inputsInvalid) {
       setResult(null);
+      setLoading(false);
+      setError(null);
       return;
     }
-    let cancelled = false;
+    const isCurrent = () => requestId === requestIdRef.current;
     setLoading(true);
     setError(null);
     client
@@ -78,17 +85,15 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
         answers: mode === "questionnaire" ? answers : null,
       })
       .then((r) => {
-        if (!cancelled) setResult(r);
+        if (!isCurrent()) return;
+        setResult(r);
+        setLoading(false);
       })
       .catch((err) => {
-        if (!cancelled) setError(client.describeError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!isCurrent()) return;
+        setError(client.describeError(err));
+        setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
     // manualWeights is derived from `manual`; depending on the strings avoids a new object each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -168,9 +173,13 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
           <div>
             <dt>Score</dt>
             <dd>
-              <code>Unlevered IRR − hurdle</code>. With preferences set, return, cash flow (year-one
-              cash-on-cash) and safety (DSCR and low leverage) are each scaled 0–1 across the
-              passing deals and blended by your weights. Levered IRR is never ranked on.
+              <code>Unlevered IRR (before closing and selling costs) − hurdle</code>. With
+              preferences set, three factors are each scaled 0–1 against{" "}
+              <strong>fixed anchors</strong> and blended by your weights: return = spread (−3% to
+              +5%); cash flow = unlevered year-one cash yield, NOI ÷ (price + closing costs) (3% to
+              8%); safety = the mean of lowest DSCR over the hold (1.0x to 2.0x) and equity share
+              (20% to 60%). Because the anchors are fixed, a deal&apos;s score doesn&apos;t depend
+              on which other deals are selected. Levered IRR is never ranked on.
             </dd>
           </div>
         </dl>
@@ -185,8 +194,15 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
             step="0.05"
             min="0"
             value={dscrInput}
+            aria-invalid={dscrInvalid}
+            aria-describedby={dscrInvalid ? "dscr-min-error" : undefined}
             onChange={(e) => setDscrInput(e.target.value)}
           />
+          {dscrInvalid && (
+            <p id="dscr-min-error" className="field-error-text" role="alert">
+              Enter a DSCR minimum of 0 or more (for example 1.25) to rank.
+            </p>
+          )}
         </div>
         <div className="field">
           <label htmlFor="treasury-override">10-yr Treasury override (%)</label>
@@ -279,7 +295,7 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
           {(
             [
               ["irr", "Return (IRR vs. hurdle)"],
-              ["cash_flow", "Cash flow (cash-on-cash)"],
+              ["cash_flow", "Cash flow (unlevered year-one cash yield)"],
               ["risk", "Safety (DSCR, low leverage)"],
             ] as [keyof typeof manual, string][]
           ).map(([key, label]) => (
@@ -353,8 +369,8 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
                   <th scope="col" className="col-ranking-basis">
                     Spread
                   </th>
-                  <th scope="col">DSCR</th>
-                  <th scope="col">Cash-on-cash</th>
+                  <th scope="col">Lowest DSCR</th>
+                  <th scope="col">Year-1 cash yield</th>
                   {mode !== "none" && <th scope="col">Score (0–100)</th>}
                   <th scope="col" className="col-reference">
                     Levered IRR
@@ -392,8 +408,18 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
                     <td className={`col-ranking-basis ${r.spread >= 0 ? "positive" : "negative"}`}>
                       {signed(r.spread)}
                     </td>
-                    <td>{formatMultiple(r.metrics.year_one_dscr)}</td>
-                    <td>{formatPercent(r.metrics.cash_on_cash)}</td>
+                    <td
+                      title={
+                        r.metrics.min_dscr === null
+                          ? undefined
+                          : `Lowest combined DSCR over the hold (the gate); year 1: ${formatMultiple(r.metrics.year_one_dscr)}`
+                      }
+                    >
+                      {r.metrics.min_dscr === null
+                        ? "n/a (no debt)"
+                        : formatMultiple(r.metrics.min_dscr)}
+                    </td>
+                    <td>{formatPercent(r.metrics.unlevered_cash_yield)}</td>
                     {mode !== "none" && (
                       <td
                         title={`return ${r.factors.irr.toFixed(2)} · cash flow ${r.factors.cash_flow.toFixed(2)} · safety ${r.factors.risk.toFixed(2)}`}
@@ -413,8 +439,10 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
             </div>
           )}
           <p className="hurdle-hint">
-            Hover a hurdle or score for its breakdown. Scores are relative to the deals selected:
-            the best deal on a factor gets 1, the worst 0, so they spread out more with fewer deals.
+            Hover a hurdle or score for its breakdown, or a DSCR for its year-one value. Lowest DSCR
+            is the minimum over the hold, which is what the gate tests. Each factor is scored
+            against fixed anchors, so adding or removing other deals doesn&apos;t change a
+            deal&apos;s score.
           </p>
 
           {result.excluded.length > 0 && (
@@ -424,6 +452,9 @@ export function RiskRankingView({ selectedDealIds, onSettingsChange }: RiskRanki
                 {result.excluded.map((e) => (
                   <li key={e.deal.id}>
                     <strong>{e.deal.name}</strong> — {e.reason}
+                    {e.spread !== null
+                      ? ` Its spread vs. hurdle is ${formatPercent(e.spread)} (shown for reference; it is not ranked).`
+                      : ""}
                   </li>
                 ))}
               </ul>

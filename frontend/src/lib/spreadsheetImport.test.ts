@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { candidateValue, inferBeds, unitMixFromTable } from "./spreadsheetImport";
+import {
+  candidateValue,
+  cleanImportedValue,
+  inferBeds,
+  unitMixFromTable,
+} from "./spreadsheetImport";
 import type { ImportCandidate, ImportField, ImportUnitMix } from "./types";
 
 function field(kind: ImportField["kind"], choices: ImportField["choices"] = []): ImportField {
@@ -107,5 +112,23 @@ describe("unitMixFromTable", () => {
     const rows = unitMixFromTable(table, { ...table.mapping, rent: null, bedsPerUnit: 2 });
     expect(rows.map((r) => r.rent)).toEqual(["0", "0"]);
     expect(rows[1].bedsPerUnit).toBe("2");
+  });
+});
+
+describe("cleanImportedValue", () => {
+  it("strips currency, commas, percent signs and spaces from numeric fields", () => {
+    expect(cleanImportedValue("money", " $1,250,000 ")).toBe("1250000");
+    expect(cleanImportedValue("percent", "5.5 %")).toBe("5.5");
+    expect(cleanImportedValue("integer", "1,200")).toBe("1200");
+    expect(cleanImportedValue("number", "-3.25")).toBe("-3.25");
+  });
+
+  it("keeps an unreadable number as typed so validation can flag it", () => {
+    expect(cleanImportedValue("money", "about 5k")).toBe("about 5k");
+  });
+
+  it("only trims text and choice fields", () => {
+    expect(cleanImportedValue("text", " Oak Ridge, $1M ")).toBe("Oak Ridge, $1M");
+    expect(cleanImportedValue("choice", " per_unit ")).toBe("per_unit");
   });
 });
