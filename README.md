@@ -51,7 +51,7 @@ A read-only, tool-grounded chat drawer ("Ask DealRank") answers questions such a
 ranked below Deal A?" or "which deals failed the DSCR gate?". The model never does math: it can only
 call read-only tools (`backend/app/api/chat_tools.py`) that wrap the deterministic engine, and it is
 told to quote their output. Tool calls are validated with Pydantic and limited to an allowlist.
-It talks to any OpenAI-compatible endpoint (Gemini free tier by default); set `LLM_BASE_URL`,
+It talks to any OpenAI-compatible endpoint (Gemini free tier by default; get a key at https://aistudio.google.com/apikey); set `LLM_BASE_URL`,
 `LLM_API_KEY` and `LLM_MODEL` in `backend/.env` (see `backend/.env.example`, including Groq,
 OpenRouter and Ollama examples). With no key, or when the provider is rate-limited or down, the UI
 falls back to deterministic preset questions (`GET /chat/suggestions`, `POST /chat/preset`).

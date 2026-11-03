@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # chat reports "not configured" and the UI falls back to preset answers.
     LLM_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     LLM_API_KEY: SecretStr = SecretStr("")
-    LLM_MODEL: str = "gemini-2.5-flash"
+    LLM_MODEL: str = "gemini-3.8-flash"
     LLM_MAX_TOKENS: int = Field(default=1024, ge=64, le=8192)
     CHAT_RATE_LIMIT_PER_MIN: int = Field(default=10, ge=1, le=600)
 
