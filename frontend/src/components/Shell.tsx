@@ -1,5 +1,8 @@
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useAuth } from "./EntryGate";
+import { hasSeenTutorial, markTutorialSeen } from "../lib/tutorial";
+import { Tutorial } from "./Tutorial";
 
 export type Tab = "home" | "deals" | "compare" | "rank" | "risk" | "sensitivity" | "market";
 
@@ -13,6 +16,9 @@ export const ICONS: Record<Tab, string> = {
   market:
     "M12 21s7-5.6 7-11a7 7 0 10-14 0c0 5.4 7 11 7 11zM12 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z",
 };
+
+const HELP_ICON =
+  "M12 21a9 9 0 100-18 9 9 0 000 18zM9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "home", label: "Home" },
@@ -33,6 +39,24 @@ interface ShellProps {
 export function Shell({ activeTab, onTabChange, children }: ShellProps) {
   const current = TABS.find((t) => t.id === activeTab);
   const auth = useAuth();
+  // The tutorial opens by itself on the first launch, and from the Help tab after that.
+  const [tutorialOpen, setTutorialOpen] = useState(() => !hasSeenTutorial());
+  // The tour switches views as it goes; closing it puts the user back where they were.
+  const tabBeforeTutorial = useRef<Tab>(activeTab);
+  const helpButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  function openTutorial() {
+    tabBeforeTutorial.current = activeTab;
+    setTutorialOpen(true);
+  }
+
+  function closeTutorial() {
+    markTutorialSeen();
+    setTutorialOpen(false);
+    onTabChange(tabBeforeTutorial.current);
+    helpButtonRef.current?.focus();
+  }
+
   return (
     <div className="app-shell">
       <aside className="rail">
@@ -50,6 +74,7 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
             <button
               key={tab.id}
               type="button"
+              data-tour={`tab-${tab.id}`}
               aria-current={tab.id === activeTab ? "page" : undefined}
               className={tab.id === activeTab ? "active" : ""}
               onClick={() => onTabChange(tab.id)}
@@ -60,6 +85,19 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
               {tab.label}
             </button>
           ))}
+          <button
+            ref={helpButtonRef}
+            type="button"
+            className="help-tab"
+            data-tour="tab-help"
+            aria-haspopup="dialog"
+            onClick={openTutorial}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path d={HELP_ICON} />
+            </svg>
+            Help
+          </button>
         </nav>
 
         <p className="rail-note">Multifamily deal comparison and ranking</p>
@@ -77,6 +115,8 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
         {activeTab !== "home" && <h1 className="page-title">{current?.label}</h1>}
         {children}
       </main>
+
+      {tutorialOpen && <Tutorial onClose={closeTutorial} onNavigate={onTabChange} />}
     </div>
   );
 }

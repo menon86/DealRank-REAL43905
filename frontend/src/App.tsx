@@ -337,6 +337,7 @@ export function App() {
           ref={chatLauncherRef}
           type="button"
           className="primary chat-launcher"
+          data-tour="chat-launcher"
           onClick={() => setChatOpen(true)}
         >
           Ask DealRank
