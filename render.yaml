@@ -53,9 +53,6 @@ services:
         sync: false
       - key: ALLOWED_EMAIL_DOMAINS
         sync: false
-      # Email that owns the sample deals (and any deals from before sign-in).
-      - key: SEED_OWNER_EMAIL
-        sync: false
       # "Try the demo" button. Generate DEMO_TOKEN_SECRET once and keep it.
       - key: DEMO_ENABLED
         value: "true"

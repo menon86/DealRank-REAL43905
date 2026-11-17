@@ -161,8 +161,6 @@ user's lowercase email. The username shown in the app is the part before the `@`
   shows *Try the demo*, which creates a private throwaway account with its own copy of the sample
   deals, so visitors can edit freely without affecting anyone else. Demo accounts are deleted after
   24 hours and the endpoint is rate-limited.
-- `SEED_OWNER_EMAIL` is the account that owns the sample deals; `seed.py` also assigns any deals
-  from before sign-in to it.
 
 ## Team workflow
 

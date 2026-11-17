@@ -1,7 +1,7 @@
 """Add deals.owner_id so each signed-in user sees only their own deals.
 
-Existing rows stay NULL (visible to nobody) until seed.py assigns them to
-SEED_OWNER_EMAIL.
+Existing rows stay NULL (visible to nobody) until seed.py moves them into the
+sample-deal template.
 
 Revision ID: 0005
 Revises: 0004
