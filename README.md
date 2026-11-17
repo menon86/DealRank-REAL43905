@@ -134,6 +134,34 @@ cd frontend && npm install && npm run dev   # in another
 The frontend defaults to `http://localhost:8000` for the API — copy `frontend/.env.example` to
 `frontend/.env.local` and set `VITE_API_BASE_URL` if the backend runs somewhere else.
 
+## Sign-in
+
+Each user sees only their own deals. People sign in with Google or Microsoft; the browser gets an
+ID token from the provider and sends it to the API, which verifies it and files deals under the
+user's lowercase email. The username shown in the app is the part before the `@`.
+
+- **Local dev:** `backend/.env.example` sets `AUTH_REQUIRED=false`, so every request is one local
+  user (`dev@localhost`) and the frontend keeps the demo access-code screen. No accounts needed.
+- **Google:** create an OAuth client (type *Web application*) in Google Cloud Console, add the app's
+  origin (local and Render) under *Authorized JavaScript origins*, and set `GOOGLE_CLIENT_ID` (API)
+  and `VITE_GOOGLE_CLIENT_ID` (frontend).
+- **Microsoft:** register an app in Microsoft Entra ID (*Single-page application*, redirect URI =
+  the app's origin). Set `MICROSOFT_CLIENT_ID` / `VITE_MICROSOFT_CLIENT_ID` and the directory
+  (tenant) id in `MICROSOFT_TENANT_ID` / `VITE_MICROSOFT_TENANT_ID`. The tenant is required:
+  Microsoft emails are only trusted when the token comes from that tenant. Purdue accounts may need
+  Purdue IT to approve the app before users can consent.
+- `ALLOWED_EMAIL_DOMAINS` (optional) limits sign-in to listed domains, e.g. `purdue.edu`.
+- **Starting deals:** every account starts with its own copy of the 12 sample deals (3 student
+  housing, 4 suburban garden, 5 urban mid-rise; `backend/app/sample_deals.py`), copied the first time
+  the user signs in. Deleting them is permanent: the first visit is recorded in `user_profiles`, so
+  they are never re-added. `seed.py` keeps the template those copies come from up to date. Six
+  deals from the earlier set of 18 were deleted on purpose and are no longer in the list.
+- **Demo profile:** set `DEMO_ENABLED=true` and a `DEMO_TOKEN_SECRET` (32+ random characters; Render
+  generates one) on the API, and `VITE_DEMO_ENABLED=true` on the frontend. The sign-in screen then
+  shows *Try the demo*, which creates a private throwaway account with its own copy of the sample
+  deals, so visitors can edit freely without affecting anyone else. Demo accounts are deleted after
+  24 hours and the endpoint is rate-limited.
+
 ## Team workflow
 
 - `main` is protected: no direct pushes, PR + review required, CI must pass.

@@ -30,6 +30,23 @@ class Settings(BaseSettings):
     APP_NAME: str = "DealRank"
     LOG_LEVEL: str = "info"
     CORS_ORIGINS: str = "http://localhost:5173"
+
+    # Sign-in (app/auth.py). AUTH_REQUIRED=false skips verification and treats
+    # every request as one local dev user; never set it on a deployed service.
+    AUTH_REQUIRED: bool = True
+    GOOGLE_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_ID: str = ""
+    # Directory (tenant) id that Microsoft sign-ins must come from, e.g. Purdue's.
+    MICROSOFT_TENANT_ID: str = ""
+    # Optional comma-separated allowlist (e.g. "purdue.edu,gmail.com"); empty = any.
+    ALLOWED_EMAIL_DOMAINS: str = ""
+
+    # "Try the demo" (app/demo.py): a public endpoint that hands out a private
+    # throwaway account with copies of the template deals. Off unless both are set.
+    DEMO_ENABLED: bool = False
+    DEMO_TOKEN_SECRET: SecretStr = SecretStr("")
+    DEMO_TOKEN_TTL_MINUTES: int = Field(default=480, ge=5, le=1440)
+    DEMO_RATE_LIMIT_PER_MIN: int = Field(default=5, ge=1, le=600)
     # Used when the live FRED lookup fails; the API labels any hurdle built
     # on it as "fallback" so it is never mistaken for a live quote.
     TREASURY_10Y_FALLBACK: Decimal = Decimal("0.046")
@@ -58,6 +75,15 @@ class Settings(BaseSettings):
     @classmethod
     def _use_psycopg3_driver(cls, url: str) -> str:
         return normalize_database_url(url)
+
+    @property
+    def demo_configured(self) -> bool:
+        # A short secret is as good as none for HS256.
+        return self.DEMO_ENABLED and len(self.DEMO_TOKEN_SECRET.get_secret_value()) >= 32
+
+    @property
+    def allowed_email_domains_list(self) -> list[str]:
+        return [d.strip().lower() for d in self.ALLOWED_EMAIL_DOMAINS.split(",") if d.strip()]
 
     @property
     def cors_origins_list(self) -> list[str]:
