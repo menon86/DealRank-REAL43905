@@ -14,7 +14,6 @@ from app.api.ranking_data import RANKING_BASIS_NOTE
 from app.api.risk_rank import BASIS_NOTE
 from app.models.cap_rate_spread import CapRateSpread
 from app.models.market_rent import MarketRent
-from tests.api.conftest import TEST_OWNER
 from tests.engine import fixtures
 from tests.engine.independent_math import forward_noi
 
@@ -25,7 +24,7 @@ MIDRISE = "Meridian Urban Mid-Rise"
 
 @pytest.fixture()
 def ctx(db_session, chat_deals):
-    return ToolContext(owner=TEST_OWNER, db=db_session)
+    return ToolContext(db=db_session)
 
 
 def call(ctx, name, **args):
@@ -101,11 +100,9 @@ def test_rank_deals_simple_hurdle(ctx):
 
 
 def test_rank_deals_defaults_to_the_ui_hurdle_or_asks_for_one(db_session, chat_deals):
-    out, ok = call(ToolContext(owner=TEST_OWNER, db=db_session), "rank_deals")
+    out, ok = call(ToolContext(db=db_session), "rank_deals")
     assert not ok and out["error"] == "missing_argument"
-    out, ok = call(
-        ToolContext(owner=TEST_OWNER, db=db_session, hurdle_rate=D("0.07")), "rank_deals"
-    )
+    out, ok = call(ToolContext(db=db_session, hurdle_rate=D("0.07")), "rank_deals")
     assert ok and out["hurdle_rate"] == "7.00%"
 
 
@@ -131,9 +128,7 @@ def test_risk_rank_gate_exclusion_hurdles_and_basis(ctx):
 
 def test_risk_rank_takes_ui_defaults_and_overrides(db_session, chat_deals):
     selected = (chat_deals[GARDEN].id, chat_deals[STUDENT].id)
-    ui = ToolContext(
-        owner=TEST_OWNER, db=db_session, selected_deal_ids=selected, dscr_minimum=D("1.4")
-    )
+    ui = ToolContext(db=db_session, selected_deal_ids=selected, dscr_minimum=D("1.4"))
     out, _ = call(ui, "risk_rank")
     assert [r["deal"] for r in out["ranked"]] == [GARDEN]  # 1.4x gate from the UI
     assert [e["deal"] for e in out["excluded"]] == [STUDENT]
@@ -203,7 +198,7 @@ def test_get_hurdles_breakdown_and_fallback_label(ctx, chat_treasury):
 
 
 def test_missing_reference_data_is_reported(db_session, chat_deals):
-    ctx = ToolContext(owner=TEST_OWNER, db=db_session)
+    ctx = ToolContext(db=db_session)
     ranked, ok = call(ctx, "risk_rank")
     assert ok
     db_session.execute(CapRateSpread.__table__.delete())
@@ -212,7 +207,7 @@ def test_missing_reference_data_is_reported(db_session, chat_deals):
 
 
 def test_no_deals_is_reported(db_session):
-    out, ok = call(ToolContext(owner=TEST_OWNER, db=db_session), "risk_rank")
+    out, ok = call(ToolContext(db=db_session), "risk_rank")
     assert not ok and out["error"] == "no_deals"
 
 
@@ -329,15 +324,15 @@ def test_presets_flag_a_fallback_treasury(ctx, chat_treasury):
 
 
 def test_presets_when_everything_is_gated_out(db_session, chat_deals):
-    ui = ToolContext(owner=TEST_OWNER, db=db_session, dscr_minimum=D("3"))
+    ui = ToolContext(db=db_session, dscr_minimum=D("3"))
     assert "No deal is ranked" in answer_preset(ui, "top_deal")
     assert answer_preset(ui, "dscr_gate").count("\n- ") == 3
 
 
 def test_presets_without_data_say_so(db_session):
-    text = answer_preset(ToolContext(owner=TEST_OWNER, db=db_session), "top_deal")
+    text = answer_preset(ToolContext(db=db_session), "top_deal")
     assert text.startswith("I can't answer that yet")
-    assert "No deal" in answer_preset(ToolContext(owner=TEST_OWNER, db=db_session), "dscr_extremes")
+    assert "No deal" in answer_preset(ToolContext(db=db_session), "dscr_extremes")
 
 
 def test_unknown_preset_raises(ctx):

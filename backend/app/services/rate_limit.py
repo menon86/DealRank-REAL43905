@@ -1,4 +1,4 @@
-"""Per-client sliding-window rate limit for the chat and demo endpoints.
+"""Per-client sliding-window rate limit for the chat endpoint.
 
 Limitation, on purpose: this is in-memory and per-process. The API has no
 auth, so this only stops casual abuse of a free-tier LLM key. With several
@@ -49,4 +49,3 @@ class SlidingWindowLimiter:
 
 
 chat_limiter = SlidingWindowLimiter()
-demo_limiter = SlidingWindowLimiter()

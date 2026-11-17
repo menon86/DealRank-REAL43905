@@ -12,7 +12,6 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.converters import deal_to_engine_inputs
-from app.api.ownership import get_owned_deal
 from app.engine.metrics import compute
 from app.engine.types import DealMetrics
 from app.models.deal import Deal
@@ -38,18 +37,17 @@ class RankedEntry:
 
 
 def gather_ranked_entries(
-    db: Session, deal_ids: list[uuid.UUID], hurdle_rate: Decimal, owner: str
+    db: Session, deal_ids: list[uuid.UUID], hurdle_rate: Decimal
 ) -> list[RankedEntry]:
     """Loads each deal, computes its metrics, and returns them sorted by
     unlevered IRR minus hurdle_rate, descending, with rank assigned.
-    Raises HTTPException(404) naming the first deal id that is unknown or
-    not owned by `owner`.
+    Raises HTTPException(404) naming the first unknown deal id.
     """
     unranked: list[tuple[Deal, DealMetrics, Decimal]] = []
 
     # A deal listed twice is ranked once.
     for deal_id in dict.fromkeys(deal_ids):
-        deal = get_owned_deal(db, deal_id, owner)
+        deal = db.get(Deal, deal_id)
         if deal is None:
             raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
 

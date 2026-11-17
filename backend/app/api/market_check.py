@@ -2,14 +2,13 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.analysis_schemas import GeographyOut, RentCheckOut
-from app.api.ownership import get_owned_deal_or_404
-from app.auth import current_owner
 from app.db import get_db
+from app.models.deal import Deal
 from app.models.market_rent import MarketRent
 from app.services.market_rents import check_rent
 
@@ -32,9 +31,10 @@ def rent_check(
     geography: str = Query(min_length=1),
     source: str | None = None,
     db: Session = Depends(get_db),
-    owner: str = Depends(current_owner),
 ) -> RentCheckOut:
-    deal = get_owned_deal_or_404(db, deal_id, owner)
+    deal = db.get(Deal, deal_id)
+    if deal is None:
+        raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
     result = check_rent(db, geography, per_unit_rent=deal.monthly_rent_per_unit, source=source)
     return RentCheckOut(
         status=result.status,

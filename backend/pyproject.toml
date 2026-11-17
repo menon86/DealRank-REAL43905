@@ -29,8 +29,6 @@ dependencies = [
     "openpyxl>=3.1,<4.0",
     "defusedxml>=0.7,<0.8",
     "python-multipart>=0.0.18,<0.1",
-    # Verifies Google / Microsoft ID tokens (app/auth.py); [crypto] for RS256.
-    "PyJWT[crypto]>=2.9,<3.0",
 ]
 
 [project.optional-dependencies]

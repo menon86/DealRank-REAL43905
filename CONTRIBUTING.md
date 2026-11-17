@@ -34,7 +34,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env          # defaults already match docker-compose
 alembic upgrade head
-python seed.py                # loads the 12 sample deals (see app/sample_deals.py)
+python seed.py                # loads one example deal per sub-type
 uvicorn app.main:app --reload --port 8000
 
 # 3. Frontend (separate terminal)

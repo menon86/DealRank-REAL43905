@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { signOut, useAuthUser } from "../lib/auth";
 
 export type Tab = "home" | "deals" | "compare" | "rank" | "risk" | "sensitivity" | "market";
 
@@ -32,7 +31,6 @@ interface ShellProps {
 
 export function Shell({ activeTab, onTabChange, children }: ShellProps) {
   const current = TABS.find((t) => t.id === activeTab);
-  const user = useAuthUser();
   return (
     <div className="app-shell">
       <aside className="rail">
@@ -61,17 +59,6 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
             </button>
           ))}
         </nav>
-
-        {user && (
-          <div className="rail-user">
-            <span className="rail-user__name" title={user.email}>
-              {user.username}
-            </span>
-            <button type="button" className="rail-user__out" onClick={signOut}>
-              Sign out
-            </button>
-          </div>
-        )}
 
         <p className="rail-note">Multifamily deal comparison and ranking</p>
       </aside>
