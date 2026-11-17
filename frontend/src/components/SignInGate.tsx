@@ -94,7 +94,8 @@ export function SignInGate({ children }: { children: ReactNode }) {
       </main>
 
       <footer className="gate__footer">
-        REAL 43905 &middot; Purdue Daniels School of Business
+        REAL 43905 &middot; Purdue Daniels School of Business &middot;{" "}
+        <a href="/about.html">About</a> &middot; <a href="/privacy.html">Privacy</a>
       </footer>
     </div>
   );
