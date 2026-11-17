@@ -917,3 +917,158 @@ input[type="radio"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Help tab + click-through tutorial (components/Tutorial.tsx) -------- */
+
+.rail .tab-strip .help-tab {
+  margin-top: 14px;
+  border-top: 1px solid var(--ink-soft);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding-top: 14px;
+}
+
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.tour__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 23, 39, 0.55);
+}
+
+/* A ring around the highlighted element; its huge shadow dims everything else. */
+.tour__spotlight {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 3px var(--brass),
+    0 0 0 9999px rgba(12, 23, 39, 0.55);
+  pointer-events: none;
+  transition:
+    top 0.25s ease,
+    left 0.25s ease,
+    width 0.25s ease,
+    height 0.25s ease;
+}
+
+.tour__card {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  width: min(440px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 22px 24px 18px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 50px rgba(12, 23, 39, 0.35);
+  font-family:
+    "Instrument Sans",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+}
+
+/* On wide screens, centre the card over the main area rather than the rail. */
+@media (min-width: 861px) {
+  .tour__card {
+    left: calc(50% + 120px);
+  }
+}
+
+.tour__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.tour__close:hover {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.tour__close svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.tour__count {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brass-text);
+}
+
+.tour__title {
+  margin: 0 36px 8px 0;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+
+.tour__body {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-text-muted);
+}
+
+.tour__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tour__dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tour__dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+
+.tour__dots span.active {
+  background: var(--color-primary);
+}
+
+.tour__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 860px) {
+  .rail .tab-strip .help-tab {
+    margin-top: 0;
+    padding-top: 9px;
+    border-top: none;
+    border-radius: var(--radius-sm);
+  }
+
+  .tour__card {
+    bottom: 16px;
+  }
+}
