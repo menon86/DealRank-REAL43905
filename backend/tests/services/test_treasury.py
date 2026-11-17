@@ -143,3 +143,19 @@ def test_failed_lookup_is_not_retried_within_the_backoff(monkeypatch):
 def test_override():
     q = treasury.override_quote(D("0.05"))
     assert (q.yield_, q.source) == (D("0.05"), "override")
+
+
+def test_expired_quote_is_reused_when_every_source_fails(monkeypatch):
+    ok = {"up": True}
+
+    def handler(url):
+        if not ok["up"]:
+            raise httpx.ConnectError("down")
+        return httpx.Response(200, text=FRED_CSV, request=httpx.Request("GET", url))
+
+    _mock_get(monkeypatch, handler)
+    assert treasury.get_treasury_10y().source == "fred"
+    ok["up"] = False
+    monkeypatch.setattr(treasury, "CACHE_TTL_SECONDS", -1)
+    stale = treasury.get_treasury_10y()
+    assert stale.source == "fred" and stale.yield_ == D("0.0431")

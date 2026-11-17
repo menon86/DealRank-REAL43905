@@ -483,7 +483,7 @@ def test_get_llm_builds_a_provider_agnostic_client_from_settings():
 def test_defaults_target_gemini_and_unset_env_still_boots():
     cfg = settings()
     assert cfg.LLM_BASE_URL == "https://generativelanguage.googleapis.com/v1beta/openai/"
-    assert cfg.LLM_MODEL == "gemini-2.5-flash" and not cfg.llm_configured
+    assert cfg.LLM_MODEL == "gemini-3.8-flash" and not cfg.llm_configured
     assert cfg.CHAT_RATE_LIMIT_PER_MIN >= 1 and cfg.LLM_MAX_TOKENS >= 64
 
 

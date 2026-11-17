@@ -76,9 +76,10 @@ def sweep(
 
 @dataclass(frozen=True)
 class MonteCarloSpec:
-    """Standard deviations of independent normal draws centred on the
-    deal's own inputs. Draws are clamped to sane ranges (exit cap >= 1%,
-    rent growth within +/-20%, vacancy within 0-50%). Each draw applies to
+    """Standard deviations of normal draws centred on the deal's own
+    inputs (exit cap and rent growth correlated, vacancy independent).
+    Draws are clamped to sane ranges (exit cap >= 1%, rent growth within
+    +/-20%, vacancy within 0-50%). Each draw applies to
     the whole hold: this models uncertainty about the assumptions, not
     year-to-year volatility, and interest rates and expense growth are not
     varied.
@@ -117,9 +118,14 @@ class HistogramBin:
 class MonteCarloResult:
     simulations: int
     converged: int
+    levered_converged: int
     unlevered_irr: Distribution | None
     levered_irr: Distribution | None
     unlevered_histogram: list[HistogramBin]
+    # The unlevered IRR before closing and selling costs: the basis the
+    # risk-adjusted hurdle is quoted on (and P(below hurdle) is measured on
+    # when hurdle_on_gross_irr is set).
+    unlevered_irr_before_costs: Distribution | None
     prob_below_hurdle: Decimal | None
     prob_dscr_below_minimum: Decimal | None
 
@@ -192,8 +198,8 @@ def monte_carlo(
     dscr_minimum: Decimal | None = None,
     hurdle_on_gross_irr: bool = False,
 ) -> MonteCarloResult:
-    """Draws exit cap rate, rent growth and vacancy independently, re-runs
-    the full waterfall each time, and summarizes unlevered/levered IRR.
+    """Draws exit cap rate, rent growth (correlated with the exit cap) and
+    vacancy, re-runs the full waterfall each time, and summarizes unlevered/levered IRR.
     Pass `hurdle` for P(unlevered IRR < hurdle) and `dscr_minimum` for
     P(lowest hold-period DSCR < minimum). A fixed seed is reproducible.
     A run whose IRR doesn't converge counts as below the hurdle, not as
@@ -209,6 +215,7 @@ def monte_carlo(
 
     unlevered: list[Decimal] = []
     levered: list[Decimal] = []
+    gross: list[Decimal] = []
     below_hurdle = 0
     dscr_breaches = 0
     has_debt = total_debt(deal) > 0
@@ -233,6 +240,8 @@ def monte_carlo(
         metrics = compute(trial)
         if metrics.unlevered_irr is not None:
             unlevered.append(metrics.unlevered_irr)
+        if metrics.unlevered_irr_before_costs is not None:
+            gross.append(metrics.unlevered_irr_before_costs)
         compared = (
             metrics.unlevered_irr_before_costs if hurdle_on_gross_irr else metrics.unlevered_irr
         )
@@ -251,9 +260,11 @@ def monte_carlo(
     return MonteCarloResult(
         simulations=spec.simulations,
         converged=len(unlevered),
+        levered_converged=len(levered),
         unlevered_irr=_distribution(unlevered),
         levered_irr=_distribution(levered),
         unlevered_histogram=_histogram(unlevered),
+        unlevered_irr_before_costs=_distribution(gross),
         prob_below_hurdle=(Decimal(below_hurdle) / n) if hurdle is not None else None,
         prob_dscr_below_minimum=(
             (Decimal(dscr_breaches) / n) if dscr_minimum is not None and has_debt else None

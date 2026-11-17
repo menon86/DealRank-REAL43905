@@ -45,13 +45,12 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
           <span className="brand-name">DealRank</span>
         </div>
 
-        <div className="tab-strip" role="tablist" aria-label="Views" aria-orientation="vertical">
+        <nav className="tab-strip" aria-label="Views">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
-              role="tab"
-              aria-selected={tab.id === activeTab}
+              aria-current={tab.id === activeTab ? "page" : undefined}
               className={tab.id === activeTab ? "active" : ""}
               onClick={() => onTabChange(tab.id)}
             >
@@ -61,7 +60,7 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
               {tab.label}
             </button>
           ))}
-        </div>
+        </nav>
 
         {user && (
           <div className="rail-user">

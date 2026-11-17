@@ -1,5 +1,5 @@
-import { formatMoney, formatMultiple, formatNumber, formatPercent } from "../lib/format";
-import type { DealOut, MetricsOut } from "../lib/types";
+import { formatMoney, formatMultiple, formatPercent } from "../lib/format";
+import type { AnnualCashFlowOut, DealOut, MetricsOut } from "../lib/types";
 import { ProjectionTable } from "./ProjectionTable";
 import { ReportDownloads } from "./ReportDownloads";
 
@@ -12,6 +12,8 @@ interface ComparisonTableProps {
   hurdleRate: number;
   loading: boolean;
   error: string | null;
+  /** Deals whose last metrics fetch failed; their columns show older numbers. */
+  staleDealIds?: string[];
   onRetry: () => void;
 }
 
@@ -33,29 +35,56 @@ interface Row {
   note?: string;
 }
 
+/** Year 1 cash flow line, or null while it hasn't loaded. */
+function yearOne(m: MetricsOut, key: keyof AnnualCashFlowOut): number | null {
+  const cf = m.annual_cash_flows[0];
+  return cf ? cf[key] : null;
+}
+
+/**
+ * Mirrors ProjectionTable's line items for year 1, so each column adds up:
+ * GPR − vacancy − credit loss + other income = EGI; EGI − OpEx − turnover −
+ * management fee = NOI; NOI − reserves − debt service − preferred return −
+ * balloon = levered cash flow.
+ */
 const YEAR_ONE_ROWS: Row[] = [
   {
     label: "Gross potential rent",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.gpr ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "gpr")),
   },
   {
     label: "Vacancy loss",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.vacancy_loss ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "vacancy_loss")),
     kind: "deduction",
   },
   {
+    label: "Bad debt & concessions",
+    value: (_, m) => formatMoney(yearOne(m, "credit_loss")),
+    kind: "deduction",
+  },
+  {
+    label: "Other income",
+    value: (_, m) => formatMoney(yearOne(m, "other_income")),
+    kind: "addition",
+  },
+  {
     label: "Effective gross income",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.egi ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "egi")),
     kind: "subtotal",
   },
   {
     label: "Operating expenses",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.opex ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "opex")),
     kind: "deduction",
   },
   {
     label: "Turnover expense",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.turnover_expense ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "turnover_expense")),
+    kind: "deduction",
+  },
+  {
+    label: "Management fee",
+    value: (_, m) => formatMoney(yearOne(m, "management_fee")),
     kind: "deduction",
   },
   {
@@ -64,18 +93,28 @@ const YEAR_ONE_ROWS: Row[] = [
     kind: "subtotal",
   },
   {
+    label: "Replacement reserves",
+    value: (_, m) => formatMoney(yearOne(m, "replacement_reserves")),
+    kind: "deduction",
+  },
+  {
     label: "Debt service (all debt)",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.debt_service ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "debt_service")),
     kind: "deduction",
   },
   {
     label: "Preferred return",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.preferred_distribution ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "preferred_distribution")),
+    kind: "deduction",
+  },
+  {
+    label: "Balloon repayment",
+    value: (_, m) => formatMoney(yearOne(m, "balloon_payment")),
     kind: "deduction",
   },
   {
     label: "Year 1 levered cash flow",
-    value: (_, m) => formatMoney(m.annual_cash_flows[0]?.levered_cash_flow ?? null),
+    value: (_, m) => formatMoney(yearOne(m, "levered_cash_flow")),
     kind: "subtotal",
   },
 ];
@@ -119,10 +158,15 @@ const EQUITY_ROWS: Row[] = [
   { label: "Equity multiple", value: (_, m) => formatMultiple(m.equity_multiple) },
 ];
 
+/** The API returns null DSCR when the deal carries no debt. */
+function formatDscr(value: number | null): string {
+  return value === null ? "n/a (no debt)" : formatMultiple(value);
+}
+
 const OPERATING_METRIC_ROWS: Row[] = [
   { label: "Going-in cap rate", value: (_, m) => formatPercent(m.going_in_cap_rate) },
-  { label: "Year 1 senior DSCR", value: (_, m) => formatNumber(m.year_one_senior_dscr) },
-  { label: "Year 1 combined DSCR", value: (_, m) => formatNumber(m.year_one_dscr) },
+  { label: "Year 1 senior DSCR", value: (_, m) => formatDscr(m.year_one_senior_dscr) },
+  { label: "Year 1 combined DSCR", value: (_, m) => formatDscr(m.year_one_dscr) },
 ];
 
 const EXIT_ROWS: Row[] = [
@@ -154,15 +198,22 @@ const EXIT_ROWS: Row[] = [
 
 /** The v1 scope's per-deal formulas, shown verbatim under the table. */
 const FORMULAS: [string, string][] = [
-  ["EGI", "Gross potential rent × (1 − vacancy rate) + other income"],
-  ["NOI", "EGI − operating expenses (including turnover)"],
+  ["Other income (year n)", "Other income × (1 + other income growth rate) ^ (n − 1)"],
+  ["Credit loss", "Gross potential rent × credit loss rate (bad debt and concessions)"],
+  ["EGI", "Gross potential rent − vacancy loss − credit loss + other income"],
+  ["Management fee", "EGI × management fee rate"],
+  ["NOI", "EGI − operating expenses − turnover − management fee"],
   [
     "NOI (year n)",
     "Rent grows at the rent growth rate and expenses at the expense growth rate, compounded annually",
   ],
   [
+    "Replacement reserves",
+    "Reserve per unit or bed × units or beds, growing with expenses; paid below NOI, so NOI, cap rate, DSCR and exit value are before reserves",
+  ],
+  [
     "Common equity invested",
-    "Purchase price + closing costs + financing fees and rate caps − all debt − preferred equity",
+    "Purchase price + closing costs + financing fees, rate caps and upfront mortgage insurance − all debt − preferred equity (must be at least 5% of that total cost)",
   ],
   ["Going-in cap rate", "Year 1 NOI ÷ purchase price"],
   [
@@ -173,7 +224,7 @@ const FORMULAS: [string, string][] = [
   ["Combined DSCR", "NOI ÷ debt service on every debt layer (preferred equity excluded)"],
   [
     "Levered cash flow (year n)",
-    "NOI (year n) − debt service − preferred return − any balloon from a loan maturing that year",
+    "NOI (year n) − replacement reserves − debt service − preferred return − any balloon from a loan maturing that year",
   ],
   ["Cash-on-cash", "Year 1 levered cash flow ÷ common equity invested"],
   ["Exit value", "NOI (year N+1) ÷ exit cap rate"],
@@ -185,10 +236,13 @@ const FORMULAS: [string, string][] = [
     "Prepayment penalty",
     "Charged on a loan repaid at the sale before maturity. Step-down: the loan-year % × balance. Yield maintenance: PV at Treasury of (note rate − Treasury) on the balance to maturity, at least 1%. Defeasance: PV at Treasury of every remaining payment, less the balance",
   ],
-  ["Levered IRR", "IRR of −equity, levered cash flow years 1…N, plus net sale proceeds in year N"],
+  [
+    "Levered IRR",
+    "IRR of −common equity, levered cash flow (after reserves) years 1…N, plus net sale proceeds in year N",
+  ],
   [
     "Unlevered IRR",
-    "IRR of −(price + closing costs), NOI years 1…N, plus exit value − selling costs in year N; no debt",
+    "IRR of −(price + closing costs), NOI less replacement reserves years 1…N, plus exit value − selling costs in year N; no debt",
   ],
   [
     "Equity multiple",
@@ -202,8 +256,12 @@ export function ComparisonTable({
   hurdleRate,
   loading,
   error,
+  staleDealIds = [],
   onRetry,
 }: ComparisonTableProps) {
+  const staleNames = deals
+    .filter((deal) => staleDealIds.includes(deal.id) && metricsByDealId[deal.id])
+    .map((deal) => deal.name);
   if (deals.length === 0) {
     return (
       <div className="card">
@@ -266,6 +324,8 @@ export function ComparisonTable({
       {error && (
         <div className="status-banner error" role="alert">
           Couldn&apos;t load metrics for every selected deal. {error}
+          {staleNames.length > 0 &&
+            ` Figures for ${staleNames.join(", ")} are from an earlier calculation and may be out of date.`}
           <button type="button" className="link" onClick={onRetry}>
             Retry
           </button>
@@ -292,6 +352,9 @@ export function ComparisonTable({
                 <th key={deal.id} scope="col" className="deal-name">
                   {deal.name}
                   <span className="deal-meta">{deal.hold_period_years}-yr hold</span>
+                  {staleDealIds.includes(deal.id) && metricsByDealId[deal.id] && (
+                    <span className="deal-meta stale-flag">Stale: refresh failed</span>
+                  )}
                 </th>
               ))}
             </tr>

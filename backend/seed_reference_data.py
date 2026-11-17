@@ -1,7 +1,8 @@
 """Seed cap_rate_spreads with cap-rate-to-Treasury spreads transcribed from
 published broker/lender surveys, one row per sub-asset class (see
-app/models/deal.py's SubAssetClass). Data-only: nothing here is consumed by
-the D2 ranking engine (see TASK.md).
+app/models/deal.py's SubAssetClass). The flat-hurdle ranking (POST /rank)
+doesn't read it; the risk-adjusted ranking, Monte Carlo default hurdle and
+reports do (app/api/risk_rank.py).
 
 Sources (each row's provenance, see comments below):
   - CBRE U.S. Cap Rate Survey, H1 2026 (August 2026)
