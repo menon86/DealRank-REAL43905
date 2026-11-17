@@ -43,6 +43,88 @@ import type {
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+// ---- Sign-in (backend/app/auth.py) ----
+
+const TOKEN_KEY = "dealrank.session";
+/** Fired on window when the server rejects the saved session (expired or signed out elsewhere). */
+export const SIGNED_OUT_EVENT = "dealrank:signed-out";
+
+export function getToken(): string | null {
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setToken(token: string | null): void {
+  try {
+    if (token) window.localStorage.setItem(TOKEN_KEY, token);
+    else window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable (private mode): the session lasts until reload */
+  }
+}
+
+/**
+ * fetch() against the API with the session token attached. Every API call
+ * goes through here. A 401 means the session is gone, so the token is
+ * dropped and SIGNED_OUT_EVENT sends the user back to the sign-in screen.
+ */
+export async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401 && token) {
+    setToken(null);
+    window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+  }
+  return res;
+}
+
+export interface SignedInUser {
+  username: string;
+}
+
+async function startSession(path: string, username: string, password: string) {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) throw new ApiError("POST", path, res.status, await res.text());
+  const body = (await res.json()) as { token: string; user: SignedInUser };
+  setToken(body.token);
+  return body.user;
+}
+
+export function login(username: string, password: string): Promise<SignedInUser> {
+  return startSession("/auth/login", username, password);
+}
+
+export function register(username: string, password: string): Promise<SignedInUser> {
+  return startSession("/auth/register", username, password);
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await authFetch("/auth/logout", { method: "POST" });
+  } finally {
+    setToken(null);
+  }
+}
+
+/** The signed-in user for the saved token, or null if there is none or it has expired. */
+export async function currentUser(): Promise<SignedInUser | null> {
+  if (!getToken()) return null;
+  const res = await authFetch("/auth/me");
+  if (res.status === 401) return null;
+  if (!res.ok) throw new ApiError("GET", "/auth/me", res.status, await res.text());
+  return (await res.json()) as SignedInUser;
+}
+
 const DEAL_DECIMAL_FIELDS: (keyof DealOut)[] = [
   "monthly_rent_per_unit",
   "monthly_rent_per_bed",
@@ -241,9 +323,9 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const method = options?.method ?? "GET";
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+  const res = await authFetch(path, {
     ...options,
+    headers: { "Content-Type": "application/json", ...options?.headers },
   });
   if (!res.ok) {
     const body = await res.text();
@@ -444,7 +526,7 @@ export async function importSpreadsheet(file: File): Promise<ImportProposal> {
   const body = new FormData();
   body.append("file", file);
   // No Content-Type header: the browser sets the multipart boundary.
-  const res = await fetch(`${API_BASE_URL}/deals/import`, { method: "POST", body });
+  const res = await authFetch("/deals/import", { method: "POST", body });
   if (!res.ok) {
     throw new ApiError("POST", "/deals/import", res.status, await res.text());
   }
@@ -453,7 +535,7 @@ export async function importSpreadsheet(file: File): Promise<ImportProposal> {
 
 /** GET /deals/import/template, saved through the browser's download flow. */
 export async function downloadImportTemplate(): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/deals/import/template`);
+  const res = await authFetch("/deals/import/template");
   if (!res.ok) {
     throw new ApiError("GET", "/deals/import/template", res.status, await res.text());
   }
@@ -491,7 +573,7 @@ export async function downloadReport(
   basis: number | RiskReportParams,
 ): Promise<void> {
   const url = buildReportUrl(kind, dealIds, basis);
-  const res = await fetch(url);
+  const res = await authFetch(url);
   if (!res.ok) {
     throw new ApiError("GET", `/reports/${kind}`, res.status, await res.text());
   }

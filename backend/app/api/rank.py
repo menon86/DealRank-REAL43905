@@ -11,14 +11,17 @@ from sqlalchemy.orm import Session
 
 from app.api.ranking_data import gather_ranked_entries
 from app.api.schemas import MetricsOut, RankedDealOut, RankRequest
+from app.auth import current_owner
 from app.db import get_db
 
 router = APIRouter(tags=["rank"])
 
 
 @router.post("/rank", response_model=list[RankedDealOut])
-def rank_deals(payload: RankRequest, db: Session = Depends(get_db)) -> list[RankedDealOut]:
-    entries = gather_ranked_entries(db, payload.deal_ids, payload.hurdle_rate)
+def rank_deals(
+    payload: RankRequest, db: Session = Depends(get_db), owner: str = Depends(current_owner)
+) -> list[RankedDealOut]:
+    entries = gather_ranked_entries(db, payload.deal_ids, payload.hurdle_rate, owner)
     return [
         RankedDealOut(
             deal=entry.deal,

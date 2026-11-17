@@ -5,7 +5,7 @@
  * (rate-limited, down, not configured) the UI falls back to the presets.
  */
 
-import { API_BASE_URL, ApiError } from "./client";
+import { ApiError, authFetch } from "./client";
 import type { Weights } from "./types";
 
 export type ChatRole = "user" | "assistant";
@@ -122,7 +122,7 @@ export async function streamChat(
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/chat`, {
+  const res = await authFetch("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: prepareHistory(messages), context }),
@@ -147,9 +147,9 @@ export async function streamChat(
 }
 
 async function json<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+  const res = await authFetch(path, {
     ...options,
+    headers: { "Content-Type": "application/json", ...options?.headers },
   });
   if (!res.ok) throw new ApiError(options?.method ?? "GET", path, res.status, await res.text());
   return (await res.json()) as T;

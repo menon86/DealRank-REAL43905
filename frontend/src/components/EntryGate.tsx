@@ -1,46 +1,118 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import * as client from "../lib/client";
 
-// Demo entry gate. Deliberately accepts ANY input (including empty) — it is a
-// presentation-polish screen, not authentication. Do not rely on it for
-// security. The unlock is remembered for the browser session only.
-const STORAGE_KEY = "dealrank.demo-unlocked";
+// Username/password sign-in (backend/app/auth.py). The app only renders once
+// the server has accepted the saved session; a 401 from any API call later
+// (SIGNED_OUT_EVENT) brings this screen back.
 const EXIT_MS = 520;
 
-function readUnlocked(): boolean {
-  try {
-    return window.sessionStorage.getItem(STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
+interface AuthState {
+  username: string;
+  signOut: () => void;
 }
 
-function writeUnlocked() {
-  try {
-    window.sessionStorage.setItem(STORAGE_KEY, "1");
-  } catch {
-    /* storage unavailable (private mode); gate simply shows again on reload */
+const AuthContext = createContext<AuthState | null>(null);
+
+/** The signed-in user, for components inside the gate (e.g. the sidebar). */
+export function useAuth(): AuthState | null {
+  return useContext(AuthContext);
+}
+
+type Mode = "login" | "register";
+
+/** The server's error detail, or a fallback for network failures. */
+function signInError(err: unknown): string {
+  if (err instanceof client.ApiError) {
+    try {
+      const detail = (JSON.parse(err.body) as { detail?: unknown }).detail;
+      if (typeof detail === "string") return detail;
+    } catch {
+      /* not JSON */
+    }
+    return `Sign-in failed (${err.status}).`;
   }
+  return "Couldn't reach the DealRank API. Check that the backend is running.";
 }
 
 export function EntryGate({ children }: { children: ReactNode }) {
-  const [unlocked, setUnlocked] = useState(readUnlocked);
+  const [user, setUser] = useState<client.SignedInUser | null>(null);
+  const [checking, setChecking] = useState(() => client.getToken() !== null);
   const [leaving, setLeaving] = useState(false);
-  const [value, setValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<Mode>("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const usernameRef = useRef<HTMLInputElement>(null);
+
+  // Resume a saved session.
+  useEffect(() => {
+    if (!checking) return;
+    client
+      .currentUser()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setChecking(false));
+  }, [checking]);
 
   useEffect(() => {
-    if (!unlocked) inputRef.current?.focus();
-  }, [unlocked]);
+    const onSignedOut = () => setUser(null);
+    window.addEventListener(client.SIGNED_OUT_EVENT, onSignedOut);
+    return () => window.removeEventListener(client.SIGNED_OUT_EVENT, onSignedOut);
+  }, []);
 
-  if (unlocked) return <>{children}</>;
+  useEffect(() => {
+    if (!user && !checking) usernameRef.current?.focus();
+  }, [user, checking]);
 
-  function handleSubmit(event: FormEvent) {
+  const signOut = useCallback(() => {
+    void client.logout().finally(() => {
+      setUser(null);
+      setPassword("");
+      setLeaving(false);
+    });
+  }, []);
+
+  if (user && !leaving) {
+    return (
+      <AuthContext.Provider value={{ username: user.username, signOut }}>
+        {/* Keyed by user, so switching accounts starts the app fresh. */}
+        <div key={user.username} style={{ display: "contents" }}>
+          {children}
+        </div>
+      </AuthContext.Provider>
+    );
+  }
+
+  if (checking) {
+    return <div className="gate" aria-busy="true" />;
+  }
+
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (leaving) return;
-    setLeaving(true);
-    writeUnlocked();
-    window.setTimeout(() => setUnlocked(true), EXIT_MS);
+    if (submitting || leaving) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const signedIn =
+        mode === "login"
+          ? await client.login(username, password)
+          : await client.register(username, password);
+      setPassword("");
+      setLeaving(true);
+      setUser(signedIn);
+      window.setTimeout(() => setLeaving(false), EXIT_MS);
+    } catch (err) {
+      setError(signInError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function switchMode() {
+    setMode((m) => (m === "login" ? "register" : "login"));
+    setError(null);
   }
 
   return (
@@ -67,22 +139,44 @@ export function EntryGate({ children }: { children: ReactNode }) {
         </div>
 
         <h1 className="gate__title">DealRank</h1>
-        <p className="gate__subtitle">Risk-adjusted deal comparison and ranking.</p>
+        <p className="gate__subtitle">
+          {mode === "login" ? "Sign in to continue." : "Create an account."}
+        </p>
 
         <form className="gate__form" onSubmit={handleSubmit}>
+          <input
+            ref={usernameRef}
+            className="gate__input gate__input--plain"
+            type="text"
+            name="username"
+            placeholder="Username"
+            aria-label="Username"
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            required
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
           <div className="gate__field">
             <input
-              ref={inputRef}
               className="gate__input"
               type="password"
-              name="access-code"
-              placeholder="Access code"
-              aria-label="Access code"
-              autoComplete="off"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
+              name="password"
+              placeholder="Password"
+              aria-label="Password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              minLength={mode === "register" ? 8 : undefined}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
-            <button className="gate__go" type="submit" aria-label="Enter DealRank">
+            <button
+              className="gate__go"
+              type="submit"
+              disabled={submitting}
+              aria-label={mode === "login" ? "Sign in" : "Create account"}
+            >
               <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
                 <path
                   d="M3 8h9M8.5 4l4 4-4 4"
@@ -94,9 +188,19 @@ export function EntryGate({ children }: { children: ReactNode }) {
               </svg>
             </button>
           </div>
+          {error && (
+            <p className="gate__error" role="alert">
+              {error}
+            </p>
+          )}
         </form>
 
-        <p className="gate__hint">Demo access &middot; any code works</p>
+        <p className="gate__hint">
+          {mode === "login" ? "No account yet? " : "Already have an account? "}
+          <button type="button" className="gate__switch" onClick={switchMode}>
+            {mode === "login" ? "Create one" : "Sign in"}
+          </button>
+        </p>
       </main>
 
       <footer className="gate__footer">

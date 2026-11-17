@@ -31,6 +31,10 @@ class Deal(Base):
     __tablename__ = "deals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # The owning user's id (users.id as text). Every deal query filters on it
+    # (app/api/ownership.py). Null = unclaimed row that no user can see;
+    # claim_deals.py hands such rows to an account.
+    owner_id: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sub_asset_class: Mapped[SubAssetClass] = mapped_column(
         Enum(

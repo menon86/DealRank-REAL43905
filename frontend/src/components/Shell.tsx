@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useAuth } from "./EntryGate";
 import { hasSeenTutorial, markTutorialSeen } from "../lib/tutorial";
 import { Tutorial } from "./Tutorial";
 
@@ -37,6 +38,7 @@ interface ShellProps {
 
 export function Shell({ activeTab, onTabChange, children }: ShellProps) {
   const current = TABS.find((t) => t.id === activeTab);
+  const auth = useAuth();
   // The tutorial opens by itself on the first launch, and from the Help tab after that.
   const [tutorialOpen, setTutorialOpen] = useState(() => !hasSeenTutorial());
   // The tour switches views as it goes; closing it puts the user back where they were.
@@ -99,6 +101,14 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
         </nav>
 
         <p className="rail-note">Multifamily deal comparison and ranking</p>
+        {auth && (
+          <div className="rail-user">
+            <span title={auth.username}>{auth.username}</span>
+            <button type="button" onClick={auth.signOut}>
+              Sign out
+            </button>
+          </div>
+        )}
       </aside>
 
       <main className="app-main">

@@ -10,8 +10,12 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth import current_owner, require_user
 from app.db import get_db
 from app.models.cap_rate_spread import CapRateSpread
+
+# The owner_id the `client` fixture's requests run as.
+TEST_OWNER = "test-owner"
 
 
 @pytest.fixture()
@@ -23,6 +27,10 @@ def client(db_session) -> Generator[TestClient, None, None]:
     from app.main import app
 
     app.dependency_overrides[get_db] = lambda: db_session
+    # Most tests aren't about sign-in, so they run as an already signed-in user.
+    # test_auth.py uses anon_client to exercise the real check.
+    app.dependency_overrides[require_user] = lambda: None
+    app.dependency_overrides[current_owner] = lambda: TEST_OWNER
 
     # FastAPI's TestClient (httpx under the hood) bridges the sync test
     # to the ASGI app itself — plain httpx.Client + ASGITransport only
@@ -31,6 +39,20 @@ def client(db_session) -> Generator[TestClient, None, None]:
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def anon_client(db_session) -> Generator[TestClient, None, None]:
+    """Like client, but with the real sign-in check (no user overridden in)."""
+    from app.main import app
+    from app.services.rate_limit import auth_limiter
+
+    auth_limiter.reset()
+    app.dependency_overrides[get_db] = lambda: db_session
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    auth_limiter.reset()
 
 
 @pytest.fixture()
@@ -87,7 +109,7 @@ def chat_deals(db_session, spreads, chat_treasury):
 
     deals = {}
     for payload in (STUDENT_HOUSING_PAYLOAD, SUBURBAN_GARDEN_PAYLOAD, URBAN_MIDRISE_PAYLOAD):
-        deal = Deal(**payload)
+        deal = Deal(**payload, owner_id=TEST_OWNER)
         db_session.add(deal)
         deals[payload["name"]] = deal
     db_session.flush()
