@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = Field(default=1024, ge=64, le=8192)
     CHAT_RATE_LIMIT_PER_MIN: int = Field(default=10, ge=1, le=600)
 
+    # Sign-in (app/auth.py). Sessions last this many days; login/register
+    # attempts are capped per client IP per minute.
+    SESSION_TTL_DAYS: int = Field(default=30, ge=1, le=365)
+    AUTH_RATE_LIMIT_PER_MIN: int = Field(default=10, ge=1, le=600)
+    # Set false to stop new accounts being created (existing users can still sign in).
+    ALLOW_REGISTRATION: bool = True
+
     @property
     def llm_configured(self) -> bool:
         return bool(self.LLM_API_KEY.get_secret_value().strip() and self.LLM_BASE_URL.strip())

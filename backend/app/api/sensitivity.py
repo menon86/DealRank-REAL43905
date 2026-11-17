@@ -20,7 +20,9 @@ from app.api.analysis_schemas import (
     SweepResponse,
 )
 from app.api.converters import deal_to_engine_inputs
+from app.api.ownership import get_owned_deal_or_404
 from app.api.risk_rank import build_hurdle, latest_spread
+from app.auth import current_owner
 from app.db import get_db
 from app.engine import sensitivity
 from app.models.deal import Deal
@@ -32,18 +34,18 @@ router = APIRouter(tags=["sensitivity"])
 DEFAULT_SPAN = {"exit_cap_rate": Decimal("0.015"), "rent_growth_rate": Decimal("0.03")}
 
 
-def _load(db: Session, deal_id: uuid.UUID) -> Deal:
-    deal = db.get(Deal, deal_id)
-    if deal is None:
-        raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
-    return deal
+def _load(db: Session, deal_id: uuid.UUID, owner: str) -> Deal:
+    return get_owned_deal_or_404(db, deal_id, owner)
 
 
 @router.post("/deals/{deal_id}/sensitivity", response_model=SweepResponse)
 def sweep(
-    deal_id: uuid.UUID, payload: SweepRequest, db: Session = Depends(get_db)
+    deal_id: uuid.UUID,
+    payload: SweepRequest,
+    db: Session = Depends(get_db),
+    owner: str = Depends(current_owner),
 ) -> SweepResponse:
-    deal = _load(db, deal_id)
+    deal = _load(db, deal_id, owner)
     inputs = deal_to_engine_inputs(deal)
     base = getattr(inputs, payload.variable)
     span = DEFAULT_SPAN[payload.variable]
@@ -64,9 +66,12 @@ def sweep(
 
 @router.post("/deals/{deal_id}/monte-carlo", response_model=MonteCarloResponse)
 def monte_carlo(
-    deal_id: uuid.UUID, payload: MonteCarloRequest, db: Session = Depends(get_db)
+    deal_id: uuid.UUID,
+    payload: MonteCarloRequest,
+    db: Session = Depends(get_db),
+    owner: str = Depends(current_owner),
 ) -> MonteCarloResponse:
-    deal = _load(db, deal_id)
+    deal = _load(db, deal_id, owner)
     inputs = deal_to_engine_inputs(deal)
 
     if payload.hurdle is not None:

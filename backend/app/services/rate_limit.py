@@ -1,4 +1,4 @@
-"""Per-client sliding-window rate limit for the chat endpoint.
+"""Per-client sliding-window rate limits for the chat and sign-in endpoints.
 
 Limitation, on purpose: this is in-memory and per-process. The API has no
 auth, so this only stops casual abuse of a free-tier LLM key. With several
@@ -13,6 +13,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+
+from fastapi import Request
 
 WINDOW_SECONDS = 60.0
 # Prune idle keys once the table grows past this, so memory stays bounded.
@@ -48,4 +50,16 @@ class SlidingWindowLimiter:
             self._hits.clear()
 
 
+def client_key(request: Request) -> str:
+    """Rate-limit key. Behind a proxy (Render) the socket peer is the proxy, so use the
+    right-most X-Forwarded-For entry, the one our own proxy appended; left-most entries
+    are client-supplied and spoofable."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
 chat_limiter = SlidingWindowLimiter()
+# Login and register attempts, to slow down password guessing.
+auth_limiter = SlidingWindowLimiter()

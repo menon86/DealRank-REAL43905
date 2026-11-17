@@ -4,6 +4,9 @@ against the same numbers without hand-typing deals.
 
 Usage (with DATABASE_URL set, e.g. via docker-compose up + .env):
     python seed.py
+
+The rows have no owner, so no user sees them until they are claimed with
+`python claim_deals.py USERNAME`.
 """
 
 import os

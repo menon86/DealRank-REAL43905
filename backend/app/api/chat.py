@@ -30,9 +30,10 @@ from app.api.analysis_schemas import WeightsIn
 from app.api.chat_loop import LLM, REQUEST_TIMEOUT_SECONDS, stream_chat
 from app.api.chat_presets import PRESET_BY_ID, PRESETS, answer_preset
 from app.api.chat_tools import MAX_DEALS, ToolContext, UiContext
+from app.auth import current_owner
 from app.config import Settings, get_settings
 from app.db import SessionLocal, get_db
-from app.services.rate_limit import chat_limiter
+from app.services.rate_limit import chat_limiter, client_key
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -119,17 +120,7 @@ def get_session_factory():
     return _session_scope
 
 
-def client_key(request: Request) -> str:
-    """Rate-limit key. Behind a proxy (Render) the socket peer is the proxy, so use the
-    right-most X-Forwarded-For entry, the one our own proxy appended; left-most entries
-    are client-supplied and spoofable."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _ui_context(context: ChatContext | None) -> UiContext:
+def _ui_context(context: ChatContext | None, owner: str) -> UiContext:
     ranking = context.ranking if context else None
     return UiContext(
         selected_deal_ids=tuple(context.selected_deal_ids) if context else (),
@@ -137,6 +128,7 @@ def _ui_context(context: ChatContext | None) -> UiContext:
         treasury_yield=ranking.treasury_yield if ranking else None,
         weights=ranking.weights if ranking else None,
         hurdle_rate=ranking.hurdle_rate if ranking else None,
+        owner=owner,
     )
 
 
@@ -151,6 +143,7 @@ def chat(
     llm: LLM | None = Depends(get_llm),
     session_factory=Depends(get_session_factory),
     settings: Settings = Depends(get_settings),
+    owner: str = Depends(current_owner),
 ) -> StreamingResponse:
     if llm is None:
         raise HTTPException(
@@ -166,7 +159,7 @@ def chat(
         )
 
     history = [{"role": m.role, "content": m.content} for m in payload.messages]
-    ui = _ui_context(payload.context)
+    ui = _ui_context(payload.context, owner)
 
     def events() -> Generator[str, None, None]:
         for event, data in stream_chat(llm, history, ui, session_factory):
@@ -188,9 +181,13 @@ def suggestions(settings: Settings = Depends(get_settings)) -> SuggestionsOut:
 
 
 @router.post("/preset", response_model=PresetAnswerOut)
-def preset(payload: PresetRequest, db: Session = Depends(get_db)) -> PresetAnswerOut:
+def preset(
+    payload: PresetRequest,
+    db: Session = Depends(get_db),
+    owner: str = Depends(current_owner),
+) -> PresetAnswerOut:
     chosen = PRESET_BY_ID.get(payload.preset_id)
     if chosen is None:
         raise HTTPException(status_code=404, detail=f"Unknown preset '{payload.preset_id}'")
-    answer = answer_preset(ToolContext.bind(_ui_context(payload.context), db), chosen.id)
+    answer = answer_preset(ToolContext.bind(_ui_context(payload.context, owner), db), chosen.id)
     return PresetAnswerOut(id=chosen.id, question=chosen.question, answer=answer)

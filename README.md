@@ -131,6 +131,14 @@ uvicorn app.main:app --reload --port 8000   # in one terminal
 cd frontend && npm install && npm run dev   # in another
 ```
 
+Open the app and create an account. Each account starts with its own copy of the 18 demo deals
+(`backend/app/demo_deals.py`) and sees only its own deals. The deals `seed.py`
+loads (and any from before sign-in existed) have no owner until you hand them to an account:
+
+```bash
+cd backend && python claim_deals.py YOUR_USERNAME
+```
+
 The frontend defaults to `http://localhost:8000` for the API — copy `frontend/.env.example` to
 `frontend/.env.local` and set `VITE_API_BASE_URL` if the backend runs somewhere else.
 

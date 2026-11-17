@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useAuth } from "./EntryGate";
 
 export type Tab = "home" | "deals" | "compare" | "rank" | "risk" | "sensitivity" | "market";
 
@@ -31,6 +32,7 @@ interface ShellProps {
 
 export function Shell({ activeTab, onTabChange, children }: ShellProps) {
   const current = TABS.find((t) => t.id === activeTab);
+  const auth = useAuth();
   return (
     <div className="app-shell">
       <aside className="rail">
@@ -61,6 +63,14 @@ export function Shell({ activeTab, onTabChange, children }: ShellProps) {
         </nav>
 
         <p className="rail-note">Multifamily deal comparison and ranking</p>
+        {auth && (
+          <div className="rail-user">
+            <span title={auth.username}>{auth.username}</span>
+            <button type="button" onClick={auth.signOut}>
+              Sign out
+            </button>
+          </div>
+        )}
       </aside>
 
       <main className="app-main">

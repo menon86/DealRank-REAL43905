@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.api.analysis_schemas import QuestionnaireIn, RiskRankRequest, WeightsIn
 from app.api.ranking_data import gather_ranked_entries
 from app.api.risk_rank import compute_risk_ranking
+from app.auth import current_owner
 from app.db import get_db
 from app.engine.ranking import DEFAULT_DSCR_MINIMUM
 from app.reports.data import ReportData, flat_report, risk_report
@@ -39,9 +40,10 @@ def _report_data(
     weight_irr: Decimal | None,
     weight_cash_flow: Decimal | None,
     weight_risk: Decimal | None,
+    owner: str,
 ) -> ReportData:
     if hurdle_rate is not None:
-        return flat_report(gather_ranked_entries(db, deal_ids, hurdle_rate), hurdle_rate)
+        return flat_report(gather_ranked_entries(db, deal_ids, hurdle_rate, owner), hurdle_rate)
 
     weights = None
     answers = None
@@ -71,7 +73,7 @@ def _report_data(
         weights=weights,
         answers=answers,
     )
-    return risk_report(compute_risk_ranking(db, request))
+    return risk_report(compute_risk_ranking(db, request, owner))
 
 
 def _params(
@@ -87,6 +89,7 @@ def _params(
     weight_cash_flow: Decimal | None = Query(None, ge=0),
     weight_risk: Decimal | None = Query(None, ge=0),
     db: Session = Depends(get_db),
+    owner: str = Depends(current_owner),
 ) -> ReportData:
     return _report_data(
         db,
@@ -101,6 +104,7 @@ def _params(
         weight_irr,
         weight_cash_flow,
         weight_risk,
+        owner,
     )
 
 
