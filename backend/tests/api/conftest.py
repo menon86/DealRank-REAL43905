@@ -10,12 +10,8 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import User, current_user
 from app.db import get_db
 from app.models.cap_rate_spread import CapRateSpread
-
-TEST_OWNER = "tester@example.com"
-OTHER_OWNER = "someone.else@example.com"
 
 
 @pytest.fixture()
@@ -27,7 +23,6 @@ def client(db_session) -> Generator[TestClient, None, None]:
     from app.main import app
 
     app.dependency_overrides[get_db] = lambda: db_session
-    app.dependency_overrides[current_user] = lambda: User(email=TEST_OWNER)
 
     # FastAPI's TestClient (httpx under the hood) bridges the sync test
     # to the ASGI app itself — plain httpx.Client + ASGITransport only
@@ -92,7 +87,7 @@ def chat_deals(db_session, spreads, chat_treasury):
 
     deals = {}
     for payload in (STUDENT_HOUSING_PAYLOAD, SUBURBAN_GARDEN_PAYLOAD, URBAN_MIDRISE_PAYLOAD):
-        deal = Deal(**payload, owner_id=TEST_OWNER)
+        deal = Deal(**payload)
         db_session.add(deal)
         deals[payload["name"]] = deal
     db_session.flush()

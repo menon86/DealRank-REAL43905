@@ -3,6 +3,9 @@
 Existing rows stay NULL (visible to nobody) until seed.py moves them into the
 sample-deal template.
 
+Kept after the sign-in feature was reverted: the deployed database is already at
+this revision, so the history must still contain it. The owner_id schema is unused.
+
 Revision ID: 0005
 Revises: 0004
 Create Date: 2026-10-29

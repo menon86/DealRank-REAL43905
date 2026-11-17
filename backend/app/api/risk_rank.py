@@ -25,9 +25,7 @@ from app.api.analysis_schemas import (
     WeightsOut,
 )
 from app.api.converters import deal_to_engine_inputs
-from app.api.ownership import get_owned_deal
 from app.api.schemas import MetricsOut
-from app.auth import current_owner
 from app.db import get_db
 from app.engine.metrics import compute
 from app.engine.ranking import (
@@ -175,7 +173,7 @@ class RiskRanking:
     excluded: list[ExcludedRow]
 
 
-def compute_risk_ranking(db: Session, payload: RiskRankRequest, owner: str) -> RiskRanking:
+def compute_risk_ranking(db: Session, payload: RiskRankRequest) -> RiskRanking:
     treasury = (
         override_quote(payload.treasury_yield)
         if payload.treasury_yield is not None
@@ -185,7 +183,7 @@ def compute_risk_ranking(db: Session, payload: RiskRankRequest, owner: str) -> R
 
     evaluated = []
     for deal_id in dict.fromkeys(payload.deal_ids):
-        deal = get_owned_deal(db, deal_id, owner)
+        deal = db.get(Deal, deal_id)
         if deal is None:
             raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
         metrics = compute(deal_to_engine_inputs(deal))
@@ -266,12 +264,8 @@ def compute_risk_ranking(db: Session, payload: RiskRankRequest, owner: str) -> R
 
 
 @router.post("/rank/risk-adjusted", response_model=RiskRankResponse, response_model_by_alias=True)
-def rank_risk_adjusted(
-    payload: RiskRankRequest,
-    db: Session = Depends(get_db),
-    owner: str = Depends(current_owner),
-) -> RiskRankResponse:
-    result = compute_risk_ranking(db, payload, owner)
+def rank_risk_adjusted(payload: RiskRankRequest, db: Session = Depends(get_db)) -> RiskRankResponse:
+    result = compute_risk_ranking(db, payload)
     return RiskRankResponse(
         treasury=treasury_out(result.treasury),
         dscr_minimum=result.dscr_minimum,

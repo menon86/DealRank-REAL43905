@@ -26,12 +26,12 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.analysis_schemas import RiskRankRequest, SweepRequest, WeightsIn
 from app.api.converters import deal_to_engine_inputs
 from app.api.market_check import geographies, rent_check
-from app.api.ownership import get_owned_deal, owned_deals
 from app.api.ranking_data import RANKING_BASIS_NOTE, gather_ranked_entries
 from app.api.risk_rank import hurdle_table, rank_risk_adjusted
 from app.api.sensitivity import sweep
@@ -102,9 +102,6 @@ class UiContext:
     treasury_yield: Decimal | None = None
     weights: WeightsIn | None = None
     hurdle_rate: Decimal | None = None
-    # Whose deals the tools may see. Set by the route from the verified token,
-    # never from the request body. The empty default matches no deals.
-    owner: str = ""
 
 
 @dataclass(frozen=True)
@@ -125,18 +122,18 @@ def _unwrap(exc: HTTPException) -> ToolError:
     return ToolError("not_available", detail)
 
 
-def resolve_deal(db: Session, ref: str, owner: str) -> Deal:
+def resolve_deal(db: Session, ref: str) -> Deal:
     """A deal by id, exact name or unique name fragment (case-insensitive)."""
     ref = ref.strip()
     try:
-        deal = get_owned_deal(db, uuid.UUID(ref), owner)
+        deal = db.get(Deal, uuid.UUID(ref))
     except ValueError:
         deal = None
     else:
         if deal is None:
             raise ToolError("deal_not_found", f"No deal with id {ref}. Call list_deals.")
         return deal
-    deals = list(db.scalars(owned_deals(owner).order_by(Deal.created_at, Deal.id)))
+    deals = list(db.scalars(select(Deal).order_by(Deal.created_at, Deal.id)))
     needle = ref.casefold()
     exact = [d for d in deals if d.name.casefold() == needle]
     matches = exact or [d for d in deals if needle and needle in d.name.casefold()]
@@ -153,15 +150,15 @@ def resolve_deal(db: Session, ref: str, owner: str) -> Deal:
 
 def _resolve_many(ctx: ToolContext, refs: list[str] | None) -> list[Deal]:
     if refs:
-        deals = [resolve_deal(ctx.db, r, ctx.owner) for r in refs]
+        deals = [resolve_deal(ctx.db, r) for r in refs]
     elif ctx.selected_deal_ids:
         deals = []
         for deal_id in ctx.selected_deal_ids:
-            deal = get_owned_deal(ctx.db, deal_id, ctx.owner)
+            deal = ctx.db.get(Deal, deal_id)
             if deal is not None:
                 deals.append(deal)
     else:
-        deals = list(ctx.db.scalars(owned_deals(ctx.owner).order_by(Deal.created_at, Deal.id)))
+        deals = list(ctx.db.scalars(select(Deal).order_by(Deal.created_at, Deal.id)))
     deals = list({d.id: d for d in deals}.values())
     if not deals:
         raise ToolError("no_deals", "There are no deals to analyze.")
@@ -183,9 +180,7 @@ class NoArgs(_Args):
 
 def list_deals(ctx: ToolContext, args: NoArgs) -> dict[str, Any]:
     deals = list(
-        ctx.db.scalars(
-            owned_deals(ctx.owner).order_by(Deal.created_at, Deal.id).limit(MAX_DEALS + 1)
-        )
+        ctx.db.scalars(select(Deal).order_by(Deal.created_at, Deal.id).limit(MAX_DEALS + 1))
     )
     return {
         "deals": [
@@ -208,7 +203,7 @@ class DealArg(_Args):
 
 
 def get_deal(ctx: ToolContext, args: DealArg) -> dict[str, Any]:
-    d = resolve_deal(ctx.db, args.deal, ctx.owner)
+    d = resolve_deal(ctx.db, args.deal)
     rent = (
         f"{money(d.monthly_rent_per_bed)}/bed/month"
         if d.leasing_mode.value == "per_bed"
@@ -258,7 +253,7 @@ def get_deal(ctx: ToolContext, args: DealArg) -> dict[str, Any]:
 
 
 def get_metrics(ctx: ToolContext, args: DealArg) -> dict[str, Any]:
-    d = resolve_deal(ctx.db, args.deal, ctx.owner)
+    d = resolve_deal(ctx.db, args.deal)
     m = compute(deal_to_engine_inputs(d))
     y1 = m.annual_cash_flows[0] if m.annual_cash_flows else None
     return {
@@ -313,7 +308,7 @@ def rank_deals(ctx: ToolContext, args: RankDealsArgs) -> dict[str, Any]:
         raise ToolError("missing_argument", "hurdle_rate is required (a fraction, 0.07 = 7%).")
     deals = _resolve_many(ctx, args.deal_ids)
     try:
-        entries = gather_ranked_entries(ctx.db, [d.id for d in deals], hurdle, ctx.owner)
+        entries = gather_ranked_entries(ctx.db, [d.id for d in deals], hurdle)
     except HTTPException as exc:
         raise _unwrap(exc) from exc
     return {
@@ -359,7 +354,7 @@ def risk_rank(ctx: ToolContext, args: RiskRankArgs) -> dict[str, Any]:
             irr=weights.irr, cash_flow=weights.cash_flow, risk=weights.risk
         )
     try:
-        res = rank_risk_adjusted(RiskRankRequest(**kwargs), ctx.db, ctx.owner)
+        res = rank_risk_adjusted(RiskRankRequest(**kwargs), ctx.db)
     except HTTPException as exc:
         raise _unwrap(exc) from exc
     return {
@@ -416,13 +411,12 @@ class SensitivityArgs(_Args):
 
 
 def sensitivity(ctx: ToolContext, args: SensitivityArgs) -> dict[str, Any]:
-    d = resolve_deal(ctx.db, args.deal, ctx.owner)
+    d = resolve_deal(ctx.db, args.deal)
     try:
         res = sweep(
             d.id,
             SweepRequest(variable=args.variable, low=args.low, high=args.high, steps=args.steps),
             ctx.db,
-            ctx.owner,
         )
     except HTTPException as exc:
         raise _unwrap(exc) from exc
@@ -451,7 +445,7 @@ class MarketCheckArgs(_Args):
 
 
 def market_check(ctx: ToolContext, args: MarketCheckArgs) -> dict[str, Any]:
-    d = resolve_deal(ctx.db, args.deal, ctx.owner)
+    d = resolve_deal(ctx.db, args.deal)
     if not args.geography:
         geos = geographies(ctx.db)
         return {
@@ -459,7 +453,7 @@ def market_check(ctx: ToolContext, args: MarketCheckArgs) -> dict[str, Any]:
             "geographies": [{"geography": g.geography, "source": g.source} for g in geos[:30]],
         }
     try:
-        r = rent_check(d.id, args.geography, args.source, ctx.db, ctx.owner)
+        r = rent_check(d.id, args.geography, args.source, ctx.db)
     except HTTPException as exc:
         raise _unwrap(exc) from exc
     return {

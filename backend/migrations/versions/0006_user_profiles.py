@@ -4,6 +4,9 @@ One row per signed-in user, written the first time they use the app. That is
 what lets a new account start with sample deals without bringing them back
 after the user deletes them.
 
+Kept after the sign-in feature was reverted: the deployed database is already at
+this revision, so the history must still contain it. The user_profiles schema is unused.
+
 Revision ID: 0006
 Revises: 0005
 Create Date: 2026-10-29

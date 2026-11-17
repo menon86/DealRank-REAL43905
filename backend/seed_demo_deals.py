@@ -1,17 +1,23 @@
-"""The sample deals every new account starts with (and the demo profile copies).
+"""Load 18 illustrative demo deals (6 per sub-asset class) through the API.
 
-SYNTHETIC: fictional property names, with rents, expenses, cap rates and
-financing calibrated to the ranges in seed_reference_data.py's CBRE H1 2026 /
-Berkadia 2026 sources. They are not real listings.
+These are SYNTHETIC: fictional property names, with rents, expenses, cap
+rates and financing calibrated to the ranges in seed_reference_data.py's
+CBRE H1 2026 / Berkadia 2026 sources. They are not real listings.
 
-This is the one list of sample deals: seed.py loads it into the template that
-new sign-ins and demo visitors are copied from, and into the seed owner's own
-account on an empty database. Deals deleted on purpose (Cedar Point Villas,
-Heritage Park Townhomes, Oak Hall Residences, Skyline Plaza, Stadium Row
-Lofts, The Quad at Riverside) are not here, so they never come back.
+Goes through the public REST API rather than the database, so no DB
+credentials are needed. Skips any deal whose name already exists, so it is
+safe to re-run.
+
+Usage:
+    python seed_demo_deals.py https://dealrank-api.onrender.com
+    python seed_demo_deals.py http://localhost:8000
 """
 
-SAMPLE_DEALS = [
+import json
+import sys
+import urllib.request
+
+DEMO_DEALS = [
     {
         "name": "Campus Edge Commons",
         "sub_asset_class": "student_housing",
@@ -60,6 +66,81 @@ SAMPLE_DEALS = [
         "amortization_years": 30,
         "hold_period_years": 7,
         "exit_cap_rate": "0.0605",
+        "selling_costs_rate": "0.02",
+    },
+    {
+        "name": "The Quad at Riverside",
+        "sub_asset_class": "student_housing",
+        "leasing_mode": "per_bed",
+        "unit_count": None,
+        "monthly_rent_per_unit": None,
+        "bed_count": 236,
+        "monthly_rent_per_bed": "690.00",
+        "vacancy_rate": "0.09",
+        "other_income_annual": "18880.00",
+        "opex_annual": "590000.00",
+        "expense_growth_rate": "0.03",
+        "rent_growth_rate": "0.025",
+        "lease_expiration_month": 8,
+        "turnover_cost_per_unit_or_bed": "325.00",
+        "annual_turnover_rate": "0.8",
+        "purchase_price": "17360000.00",
+        "closing_costs": "347200.00",
+        "loan_amount": "11280000.00",
+        "interest_rate": "0.0675",
+        "amortization_years": 30,
+        "hold_period_years": 6,
+        "exit_cap_rate": "0.0710",
+        "selling_costs_rate": "0.02",
+    },
+    {
+        "name": "Stadium Row Lofts",
+        "sub_asset_class": "student_housing",
+        "leasing_mode": "per_bed",
+        "unit_count": None,
+        "monthly_rent_per_unit": None,
+        "bed_count": 288,
+        "monthly_rent_per_bed": "940.00",
+        "vacancy_rate": "0.07",
+        "other_income_annual": "43200.00",
+        "opex_annual": "964800.00",
+        "expense_growth_rate": "0.03",
+        "rent_growth_rate": "0.035",
+        "lease_expiration_month": 8,
+        "turnover_cost_per_unit_or_bed": "400.00",
+        "annual_turnover_rate": "0.9",
+        "purchase_price": "36290000.00",
+        "closing_costs": "725800.00",
+        "loan_amount": "21050000.00",
+        "interest_rate": "0.0615",
+        "amortization_years": 30,
+        "hold_period_years": 7,
+        "exit_cap_rate": "0.0580",
+        "selling_costs_rate": "0.02",
+    },
+    {
+        "name": "Oak Hall Residences",
+        "sub_asset_class": "student_housing",
+        "leasing_mode": "per_bed",
+        "unit_count": None,
+        "monthly_rent_per_unit": None,
+        "bed_count": 180,
+        "monthly_rent_per_bed": "725.00",
+        "vacancy_rate": "0.08",
+        "other_income_annual": "16200.00",
+        "opex_annual": "468000.00",
+        "expense_growth_rate": "0.03",
+        "rent_growth_rate": "0.025",
+        "lease_expiration_month": 8,
+        "turnover_cost_per_unit_or_bed": "325.00",
+        "annual_turnover_rate": "0.82",
+        "purchase_price": "14940000.00",
+        "closing_costs": "298800.00",
+        "loan_amount": "9560000.00",
+        "interest_rate": "0.066",
+        "amortization_years": 30,
+        "hold_period_years": 5,
+        "exit_cap_rate": "0.0675",
         "selling_costs_rate": "0.02",
     },
     {
@@ -138,6 +219,31 @@ SAMPLE_DEALS = [
         "selling_costs_rate": "0.02",
     },
     {
+        "name": "Cedar Point Villas",
+        "sub_asset_class": "suburban_garden",
+        "leasing_mode": "per_unit",
+        "unit_count": 120,
+        "monthly_rent_per_unit": "1575.00",
+        "bed_count": None,
+        "monthly_rent_per_bed": None,
+        "vacancy_rate": "0.045",
+        "other_income_annual": "86400.00",
+        "opex_annual": "768000.00",
+        "expense_growth_rate": "0.03",
+        "rent_growth_rate": "0.032",
+        "lease_expiration_month": 6,
+        "turnover_cost_per_unit_or_bed": "700.00",
+        "annual_turnover_rate": "0.45",
+        "purchase_price": "28360000.00",
+        "closing_costs": "567200.00",
+        "loan_amount": "17020000.00",
+        "interest_rate": "0.0595",
+        "amortization_years": 30,
+        "hold_period_years": 6,
+        "exit_cap_rate": "0.0540",
+        "selling_costs_rate": "0.02",
+    },
+    {
         "name": "Sycamore Crossing",
         "sub_asset_class": "suburban_garden",
         "leasing_mode": "per_unit",
@@ -160,6 +266,31 @@ SAMPLE_DEALS = [
         "amortization_years": 30,
         "hold_period_years": 8,
         "exit_cap_rate": "0.0635",
+        "selling_costs_rate": "0.02",
+    },
+    {
+        "name": "Heritage Park Townhomes",
+        "sub_asset_class": "suburban_garden",
+        "leasing_mode": "per_unit",
+        "unit_count": 96,
+        "monthly_rent_per_unit": "1690.00",
+        "bed_count": None,
+        "monthly_rent_per_bed": None,
+        "vacancy_rate": "0.04",
+        "other_income_annual": "76800.00",
+        "opex_annual": "652800.00",
+        "expense_growth_rate": "0.03",
+        "rent_growth_rate": "0.035",
+        "lease_expiration_month": 6,
+        "turnover_cost_per_unit_or_bed": "725.00",
+        "annual_turnover_rate": "0.42",
+        "purchase_price": "25790000.00",
+        "closing_costs": "515800.00",
+        "loan_amount": "14960000.00",
+        "interest_rate": "0.0585",
+        "amortization_years": 30,
+        "hold_period_years": 5,
+        "exit_cap_rate": "0.0515",
         "selling_costs_rate": "0.02",
     },
     {
@@ -288,6 +419,31 @@ SAMPLE_DEALS = [
         "selling_costs_rate": "0.02",
     },
     {
+        "name": "Skyline Plaza",
+        "sub_asset_class": "urban_midrise",
+        "leasing_mode": "per_unit",
+        "unit_count": 320,
+        "monthly_rent_per_unit": "2620.00",
+        "bed_count": None,
+        "monthly_rent_per_bed": None,
+        "vacancy_rate": "0.075",
+        "other_income_annual": "576000.00",
+        "opex_annual": "3552000.00",
+        "expense_growth_rate": "0.03",
+        "rent_growth_rate": "0.04",
+        "lease_expiration_month": 7,
+        "turnover_cost_per_unit_or_bed": "1000.00",
+        "annual_turnover_rate": "0.48",
+        "purchase_price": "131420000.00",
+        "closing_costs": "2628400.00",
+        "loan_amount": "76220000.00",
+        "interest_rate": "0.06",
+        "amortization_years": 30,
+        "hold_period_years": 7,
+        "exit_cap_rate": "0.0500",
+        "selling_costs_rate": "0.02",
+    },
+    {
         "name": "Union Depot Apartments",
         "sub_asset_class": "urban_midrise",
         "leasing_mode": "per_unit",
@@ -313,3 +469,30 @@ SAMPLE_DEALS = [
         "selling_costs_rate": "0.02",
     },
 ]
+
+
+def _request(url: str, body: dict | None = None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=90) as resp:
+        return json.load(resp)
+
+
+def main(base_url: str) -> None:
+    base_url = base_url.rstrip("/")
+    existing = {d["name"] for d in _request(f"{base_url}/deals")}
+    created = 0
+    for deal in DEMO_DEALS:
+        if deal["name"] in existing:
+            print(f"skip    {deal['name']}")
+            continue
+        _request(f"{base_url}/deals", deal)
+        created += 1
+        print(f"created {deal['name']}")
+    print(f"done: {created} created, {len(DEMO_DEALS) - created} skipped")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    main(sys.argv[1])

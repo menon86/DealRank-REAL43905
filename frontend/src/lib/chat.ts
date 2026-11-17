@@ -5,7 +5,6 @@
  * (rate-limited, down, not configured) the UI falls back to the presets.
  */
 
-import { apiFetch } from "./auth";
 import { API_BASE_URL, ApiError } from "./client";
 import type { Weights } from "./types";
 
@@ -123,7 +122,7 @@ export async function streamChat(
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await apiFetch(`${API_BASE_URL}/chat`, {
+  const res = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: prepareHistory(messages), context }),
@@ -148,7 +147,7 @@ export async function streamChat(
 }
 
 async function json<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await apiFetch(`${API_BASE_URL}${path}`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
